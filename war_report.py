@@ -124,7 +124,7 @@ def get_all_attacks(faction_id, start_timestamp, end_timestamp, api_key):
             else:
                  break
             logging.info(f"Fetched {len(attacks_chunk)} attacks, advancing to timestamp {current_from}")
-            time.sleep(1)
+            time.sleep(3)
         else:
             break
 
@@ -239,13 +239,18 @@ def main():
     parser.add_argument("-w", "--war-id", type=str, help="The ranked war ID.")
     args = parser.parse_args()
 
-    # --- Get War ID ---
+    # --- Get ALL user inputs first ---
     if args.war_id:
         war_id = args.war_id
     else:
         war_id = prompt_for_numeric_input("Please enter the Ranked War ID")
     
-    # --- Get War Data ---
+    logging.info("Please provide payout details (press Enter to use defaults):")
+    prize_total = prompt_for_numeric_input("Prize Total", default="0")
+    faction_share = prompt_for_numeric_input("Faction Share %", default=config['faction_share_default'])
+    guaranteed_share = prompt_for_numeric_input("Guaranteed Share %", default=config['guaranteed_share_default'])
+    
+    # --- Start processing and API calls ---
     war_report = get_war_details(war_id, API_KEY)
     if not war_report or 'rankedwarreport' not in war_report:
         logging.error("Could not fetch war report. Check the War ID and API key.")
@@ -268,12 +273,6 @@ def main():
     processed_data = process_war_data(war_report, all_attacks, our_faction_id)
 
     if processed_data:
-        # --- Get Optional Payout Parameters ---
-        logging.info("Please provide payout details (press Enter to use defaults):")
-        prize_total = prompt_for_numeric_input("Prize Total", default="0")
-        faction_share = prompt_for_numeric_input("Faction Share %", default=config['faction_share_default'])
-        guaranteed_share = prompt_for_numeric_input("Guaranteed Share %", default=config['guaranteed_share_default'])
-        
         generate_war_report_html(processed_data, war_id, prize_total, faction_share, guaranteed_share)
 
 if __name__ == '__main__':

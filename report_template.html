@@ -255,9 +255,12 @@
         
         function loadFromStorage() {
             const isLocked = localStorage.getItem(storagePrefix + 'locked') === 'true';
-            prizeTotalInput.value = formatNumber(localStorage.getItem(storagePrefix + 'prizeTotal') || prizeTotalInput.value);
-            factionShareInput.value = localStorage.getItem(storagePrefix + 'factionShare') || factionShareInput.value;
-            guaranteedShareInput.value = localStorage.getItem(storagePrefix + 'guaranteedShare') || guaranteedShareInput.value;
+            // Only load from storage if the state was locked. Otherwise, use the values from the Python script.
+            if (isLocked) {
+                prizeTotalInput.value = formatNumber(localStorage.getItem(storagePrefix + 'prizeTotal') || prizeTotalInput.value);
+                factionShareInput.value = localStorage.getItem(storagePrefix + 'factionShare') || factionShareInput.value;
+                guaranteedShareInput.value = localStorage.getItem(storagePrefix + 'guaranteedShare') || guaranteedShareInput.value;
+            }
             toggleLock(isLocked);
             calculatePayouts();
         }
@@ -273,6 +276,9 @@
         guaranteedShareInput.addEventListener('input', calculatePayouts);
         lockButton.addEventListener('click', () => toggleLock(!lockIcon.classList.contains('hidden')));
         screenshotButton.addEventListener('click', takeScreenshot);
+        
+        // **THIS IS THE FIX**: Format the initial prize total on page load.
+        prizeTotalInput.value = formatNumber(prizeTotalInput.value);
         
         window.onload = loadFromStorage;
     </script>
