@@ -9,50 +9,69 @@ import configparser
 import logging
 from jinja2 import Environment, FileSystemLoader
 
-# --- Configuration ---
-def get_config():
-    """Reads configuration from config.ini and returns it as a dictionary."""
-    config_parser = configparser.ConfigParser()
-    config = {
-        'api_key': None,
-        'faction_share_default': '30',
-        'guaranteed_share_default': '10'
-    }
+# --- Configuration & Profile Management ---
 
+def get_profiles():
+    """Reads all [Profile:*] sections from config.ini."""
+    config_parser = configparser.ConfigParser()
     if not os.path.exists('config.ini'):
         logging.error("config.ini file not found. Please create it.")
-        return None
+        return None, None
 
     config_parser.read('config.ini')
+    
+    # Get API Key
+    api_key = config_parser.get('TornAPI', 'ApiKey', fallback=None)
+    if not api_key or api_key == 'YourActualApiKeyHere':
+        logging.error("API key not set in [TornAPI] section of config.ini.")
+        return None, None
 
-    # Read API Key
-    if 'TornAPI' in config_parser and 'ApiKey' in config_parser['TornAPI']:
-        key = config_parser['TornAPI']['ApiKey']
-        if key and key.strip() and key != 'YourActualApiKeyHere':
-            config['api_key'] = key
+    profiles = {}
+    for section in config_parser.sections():
+        if section.startswith('Profile:'):
+            profile_name = section.split(':', 1)[1]
+            profiles[profile_name] = dict(config_parser.items(section))
+    
+    if not profiles:
+        logging.error("No profiles found in config.ini. Please define at least one [Profile:*] section.")
+        return api_key, None
+
+    return api_key, profiles
+
+def select_profile(profiles):
+    """Prompts the user to select a payout profile."""
+    profile_names = list(profiles.keys())
+    logging.info("Please select a Payout Profile for this report:")
+    for i, name in enumerate(profile_names):
+        description = profiles[name].get('description', 'No description.')
+        print(f"  [{i+1}] {name} - {description}")
+    
+    # Default to the first profile in the list ('Standard')
+    default_choice = 1
+    while True:
+        choice_input = input(f"Enter your choice (default: {default_choice}): ")
+        if choice_input.strip() == "":
+            choice = default_choice
+            break
+        
+        if choice_input.isdigit() and 1 <= int(choice_input) <= len(profile_names):
+            choice = int(choice_input)
+            break
         else:
-            logging.error("API key not set in config.ini.")
-            return None
-    else:
-        logging.error("[TornAPI] section or ApiKey not found in config.ini.")
-        return None
-
-    # Read Defaults, but don't fail if they're missing
-    if 'Defaults' in config_parser:
-        config['faction_share_default'] = config_parser['Defaults'].get('FactionShare', config['faction_share_default'])
-        config['guaranteed_share_default'] = config_parser['Defaults'].get('GuaranteedShare', config['guaranteed_share_default'])
-
-    return config
+            logging.warning("Invalid choice. Please enter a number from the list.")
+            
+    chosen_name = profile_names[choice - 1]
+    logging.info(f"Using profile: {chosen_name}")
+    return profiles[chosen_name]
 
 # --- Utility Functions ---
+
 def get_unique_filename(base_path):
     """Checks if a file exists and returns a unique name by appending a number."""
     if not os.path.exists(base_path):
         return base_path
-    
     directory, filename = os.path.split(base_path)
     name, ext = os.path.splitext(filename)
-    
     counter = 2
     while True:
         new_name = f"{name}_{counter}{ext}"
@@ -61,23 +80,8 @@ def get_unique_filename(base_path):
             return new_path
         counter += 1
 
-def prompt_for_numeric_input(prompt_message, default=None):
-    """Prompts the user for numeric input, allowing an optional default value."""
-    while True:
-        prompt_suffix = f" (default: {default})" if default is not None else ""
-        user_input = input(f"{prompt_message}{prompt_suffix}: ")
-
-        if user_input.strip() == "" and default is not None:
-            return str(default)
-        
-        cleaned_input = user_input.replace(',', '').replace('$', '').strip()
-
-        if cleaned_input.isdigit():
-            return cleaned_input
-        else:
-            logging.warning("Invalid input. Please enter a whole number or press Enter to use the default.")
-
 # --- API Fetching Functions ---
+
 def get_api_data(url):
     """Fetches data from a given Torn API URL."""
     try:
@@ -103,87 +107,156 @@ def get_war_details(war_id, api_key):
 
 def get_all_attacks(faction_id, start_timestamp, end_timestamp, api_key):
     """Fetches all faction attacks within a given timeframe."""
-    start_str = datetime.fromtimestamp(start_timestamp).strftime('%Y-%m-%d %H:%M:%S')
-    end_str = datetime.fromtimestamp(end_timestamp).strftime('%Y-%m-%d %H:%M:%S')
-    logging.info(f"Fetching all attack logs from {start_str} to {end_str}...")
-    all_attacks = []
+    logging.info(f"Fetching all faction attack logs...")
+    all_attacks = {}
     current_from = start_timestamp
 
     while current_from < end_timestamp:
-        url = f"https://api.torn.com/faction/{faction_id}?selections=attacks&from={current_from}&to={end_timestamp}&key={api_key}"
+        url = f"https://api.torn.com/faction/{faction_id}?selections=attacks,assists&from={current_from}&to={end_timestamp}&key={api_key}"
         data = get_api_data(url)
-        if data and 'attacks' in data:
-            attacks_chunk = list(data['attacks'].values())
-            if not attacks_chunk:
+        if data:
+            # Merge attacks and assists
+            if 'attacks' in data:
+                all_attacks.update(data['attacks'])
+            if 'assists' in data:
+                # Assists don't have all the same fields, we just need to know they happened
+                for assist_id, assist_data in data['assists'].items():
+                     if assist_id not in all_attacks: # Avoid overwriting full attack logs
+                        all_attacks[assist_id] = assist_data
+            
+            # Pagination logic for attacks (assists are not paginated the same way)
+            attack_logs = [v for v in data.get('attacks', {}).values()]
+            if not attack_logs:
                 break
-            all_attacks.extend(attacks_chunk)
-
-            last_timestamp = attacks_chunk[-1]['timestamp_ended']
+            
+            last_timestamp = max(v['timestamp_ended'] for v in attack_logs)
             if last_timestamp > current_from:
                  current_from = last_timestamp
             else:
                  break
-            logging.info(f"Fetched {len(attacks_chunk)} attacks, advancing to timestamp {current_from}")
+            logging.info(f"Fetched {len(attack_logs)} attacks in chunk, advancing to timestamp {current_from}")
             time.sleep(3)
         else:
             break
-
-    logging.info(f"Finished fetching. Total attacks: {len(all_attacks)}")
-    unique_attacks = list({attack['code']: attack for attack in all_attacks}.values())
-    logging.info(f"Unique attacks after de-duplication: {len(unique_attacks)}")
+    
+    unique_attacks = list(all_attacks.values())
+    logging.info(f"Finished fetching. Total unique events: {len(unique_attacks)}")
     return unique_attacks
 
-# --- Data Processing Functions ---
-def process_war_data(war_report, all_attacks, our_faction_id):
-    """Processes the raw API data to calculate member contributions."""
-    logging.info("Processing war data...")
-    war_data = war_report.get('rankedwarreport', {})
+# --- Data Processing and Payout Calculation ---
 
+def process_and_calculate_payouts(war_report, all_events, our_faction_id, profile, prize_total):
+    """Processes events and calculates payouts based on the chosen profile."""
+    logging.info("Processing data and calculating payouts...")
+    war_data = war_report.get('rankedwarreport', {})
     factions = war_data.get('factions', {})
     opponent_faction_id = None
     for fid, details in factions.items():
         if int(fid) != our_faction_id:
             opponent_faction_id = int(fid)
             break
+    if not opponent_faction_id: return None
 
-    if not opponent_faction_id:
-        logging.error("Could not determine opponent faction.")
-        return None
-
-    member_stats = {}
+    # Initialize member data structure
+    members_data = {}
     our_members_in_war = war_data.get('members', {}).get(str(our_faction_id), {})
     for member_id, member_details in our_members_in_war.items():
-        member_stats[member_id] = {'respect_gained': 0, 'name': member_details.get('name', 'Unknown')}
+        members_data[int(member_id)] = {
+            'name': member_details.get('name', 'Unknown'),
+            'respect': 0,
+            'chain_hits': 0,
+            'assists': 0,
+            'payouts': {}
+        }
 
-    for attack in all_attacks:
-        is_our_attack = (attack.get('attacker_faction') == our_faction_id and
-                         attack.get('defender_faction') == opponent_faction_id)
-        is_ranked_war_attack = attack.get('ranked_war') == 1
+    # Process all events to gather stats
+    total_respect = 0
+    total_chain_hits = 0
+    total_assists = 0
+    for event in all_events:
+        attacker_id = event.get('attacker_id')
+        if attacker_id and attacker_id not in members_data: continue # Only count members who were in the war
 
-        if is_our_attack and is_ranked_war_attack:
-            attacker_id = str(attack['attacker_id'])
-            respect_gain = attack.get('respect_gain', 0)
+        # Count Assists
+        if event.get('type') == 'assist':
+            members_data[attacker_id]['assists'] += 1
+            total_assists += 1
+            continue # Move to next event
 
-            if attacker_id in member_stats:
-                member_stats[attacker_id]['respect_gained'] += respect_gain
-            else:
-                member_stats[attacker_id] = {'respect_gained': respect_gain, 'name': attack.get('attacker_name', 'Unknown (Ex-member)')}
+        # Count Respect and Chain Hits
+        is_war_hit = (event.get('defender_faction') == opponent_faction_id and event.get('ranked_war') == 1)
+        if is_war_hit:
+            respect_gain = event.get('respect_gain', 0)
+            members_data[attacker_id]['respect'] += respect_gain
+            total_respect += respect_gain
+        
+        if event.get('chain', 0) > 0:
+            members_data[attacker_id]['chain_hits'] += 1
+            total_chain_hits += 1
 
-    active_members = {mid: stats for mid, stats in member_stats.items() if stats['respect_gained'] > 0}
-    sorted_stats = sorted(active_members.items(), key=lambda item: item[1]['respect_gained'], reverse=True)
+    # --- Payout Calculation ---
+    model = profile.get('model_type', 'standard')
+    prize_total = float(prize_total)
+    
+    # 1. Carve out faction pool
+    faction_percent = float(profile.get('faction_pool_percent', 0))
+    faction_pool = prize_total * (faction_percent / 100)
+    remaining_pool = prize_total - faction_pool
 
-    return {
-        'war_details': war_data,
-        'member_stats': sorted_stats,
-        'our_faction_name': factions.get(str(our_faction_id), {}).get('name', 'Your Faction'),
-        'opponent_faction_name': factions.get(str(opponent_faction_id), {}).get('name', 'Opponent')
+    # 2. Handle different models
+    if model == 'equal_share':
+        active_members = [m for m in members_data.values() if m['respect'] > 0]
+        if active_members:
+            share = remaining_pool / len(active_members)
+            for member in active_members:
+                member['payouts']['Main Pool'] = share
+    
+    elif model == 'multi_pool':
+        # Carve out bonus pools from the remaining pool
+        chain_percent = float(profile.get('chain_hits_pool_percent', 0))
+        assist_percent = float(profile.get('assists_pool_percent', 0))
+
+        chain_pool = remaining_pool * (chain_percent / 100)
+        assist_pool = remaining_pool * (assist_percent / 100)
+        main_payout_pool = remaining_pool - chain_pool - assist_pool
+        
+        for member in members_data.values():
+            # Main pool (respect-based)
+            if total_respect > 0:
+                member['payouts']['Main Pool (Respect)'] = main_payout_pool * (member['respect'] / total_respect)
+            # Chain pool
+            if total_chain_hits > 0:
+                member['payouts']['Chain Bonus'] = chain_pool * (member['chain_hits'] / total_chain_hits)
+            # Assist pool
+            if total_assists > 0:
+                member['payouts']['Assist Bonus'] = assist_pool * (member['assists'] / total_assists)
+
+    # Calculate total payout for each member
+    for member in members_data.values():
+        member['total_payout'] = sum(member['payouts'].values())
+
+    # Sort by total payout
+    sorted_members = sorted(members_data.values(), key=lambda x: x['total_payout'], reverse=True)
+
+    # Prepare chart data
+    chart_data = {
+        'pool_distribution': {
+            'Faction': faction_pool,
+            'Main Payout': main_payout_pool if model == 'multi_pool' else remaining_pool,
+            'Chain Bonus': chain_pool if model == 'multi_pool' else 0,
+            'Assist Bonus': assist_pool if model == 'multi_pool' else 0,
+        }
     }
 
-# --- HTML Generation Functions ---
-def generate_war_report_html(processed_data, war_id, prize_total, faction_share, guaranteed_share):
+    return sorted_members, chart_data
+
+
+# --- HTML Generation ---
+
+def generate_war_report_html(processed_members, chart_data, war_report, profile):
     """Generates the final HTML report file using a Jinja2 template."""
-    if not processed_data or not processed_data.get('member_stats'):
-        logging.warning("No participating members found with respect gained. Report generation skipped.")
+    if not processed_members:
+        logging.warning("No participating members to generate a report for.")
         return
 
     # Set up Jinja2 environment
@@ -191,89 +264,71 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
     try:
         template = env.get_template('report_template.html')
     except FileNotFoundError:
-        logging.error("report_template.html not found in the script's directory.")
+        logging.error("report_template.html not found. Please create it.")
         return
 
-    # Prepare data for the template
-    war_details = processed_data['war_details']
+    war_data = war_report['rankedwarreport']
     context = {
-        'war_id': war_id,
-        'prize_total': prize_total,
-        'faction_share': faction_share,
-        'guaranteed_share': guaranteed_share,
-        'our_faction_name': processed_data['our_faction_name'],
-        'opponent_faction_name': processed_data['opponent_faction_name'],
-        'start_str': datetime.fromtimestamp(war_details['war']['start']).strftime('%Y-%m-%d %H:%M:%S'),
-        'end_str': datetime.fromtimestamp(war_details['war']['end']).strftime('%Y-%m-%d %H:%M:%S'),
-        'member_stats': processed_data['member_stats'],
-        'total_respect_gained': sum(stats['respect_gained'] for _, stats in processed_data['member_stats'])
+        'profile_description': profile.get('description', 'No description available.'),
+        'war_id': war_data['war']['id'],
+        'our_faction_name': war_data['factions'][str(war_data['faction_id'])]['name'],
+        'opponent_faction_name': [v['name'] for k,v in war_data['factions'].items() if k != str(war_data['faction_id'])][0],
+        'start_str': datetime.fromtimestamp(war_data['war']['start']).strftime('%Y-%m-%d %H:%M:%S'),
+        'end_str': datetime.fromtimestamp(war_data['war']['end']).strftime('%Y-%m-%d %H:%M:%S'),
+        'members': processed_members,
+        'chart_data_json': json.dumps(chart_data)
     }
 
-    # Render the template with the data
     html_content = template.render(context)
     
-    # Generate a unique filename
-    opponent_name_safe = processed_data['opponent_faction_name'].replace(' ', '_').replace('[', '').replace(']', '')
-    base_filename = f"war_report_{war_id}_{opponent_name_safe}.html"
+    opponent_name_safe = context['opponent_faction_name'].replace(' ', '_').replace('[', '').replace(']', '')
+    base_filename = f"war_report_{context['war_id']}_{opponent_name_safe}.html"
     unique_filename = get_unique_filename(base_filename)
 
-    # Write the rendered HTML to the file
     with open(unique_filename, "w", encoding="utf-8") as f:
         f.write(html_content)
     logging.info(f"Successfully generated {unique_filename}")
 
 
 # --- Main Execution ---
+
 def main():
     """Main function to generate the war report."""
-    # Configure logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 
-    config = get_config()
-    if not config or not config.get('api_key'):
+    API_KEY, profiles = get_profiles()
+    if not API_KEY or not profiles:
         sys.exit(1)
     
-    API_KEY = config['api_key']
-
+    chosen_profile = select_profile(profiles)
+    
     parser = argparse.ArgumentParser(description="Generate a ranked war report for Torn.com.")
     parser.add_argument("-w", "--war-id", type=str, help="The ranked war ID.")
     args = parser.parse_args()
 
-    # --- Get ALL user inputs first ---
     if args.war_id:
         war_id = args.war_id
     else:
-        war_id = prompt_for_numeric_input("Please enter the Ranked War ID")
+        war_id = input("Please enter the Ranked War ID: ")
     
-    logging.info("Please provide payout details (press Enter to use defaults):")
-    prize_total = prompt_for_numeric_input("Prize Total", default="0")
-    faction_share = prompt_for_numeric_input("Faction Share %", default=config['faction_share_default'])
-    guaranteed_share = prompt_for_numeric_input("Guaranteed Share %", default=config['guaranteed_share_default'])
-    
-    # --- Start processing and API calls ---
-    war_report = get_war_details(war_id, API_KEY)
-    if not war_report or 'rankedwarreport' not in war_report:
-        logging.error("Could not fetch war report. Check the War ID and API key.")
-        sys.exit(1)
+    prize_total = input("Please enter the total Prize Pool amount: ")
 
-    user_data = get_api_data(f"https://api.torn.com/user/?selections=profile&key={API_KEY}")
-    if not user_data or 'faction' not in user_data or user_data['faction']['faction_id'] == 0:
-        logging.error("Could not determine your faction ID from the API key provided.")
-        sys.exit(1)
-        
-    our_faction_id = user_data['faction']['faction_id']
+    war_report = get_war_details(war_id, API_KEY)
+    if not war_report: sys.exit(1)
+
+    our_faction_id = war_report['rankedwarreport']['faction_id']
     war_start_time = war_report['rankedwarreport']['war']['start']
     war_end_time = war_report['rankedwarreport']['war']['end']
     
     fetch_start_time = war_start_time - 330
     fetch_end_time = war_end_time + 330
     
-    all_attacks = get_all_attacks(our_faction_id, fetch_start_time, fetch_end_time, API_KEY)
+    all_events = get_all_attacks(our_faction_id, fetch_start_time, fetch_end_time, API_KEY)
     
-    processed_data = process_war_data(war_report, all_attacks, our_faction_id)
+    processed_members, chart_data = process_and_calculate_payouts(war_report, all_events, our_faction_id, chosen_profile, prize_total)
 
-    if processed_data:
-        generate_war_report_html(processed_data, war_id, prize_total, faction_share, guaranteed_share)
+    if processed_members:
+        generate_war_report_html(processed_members, chart_data, war_report, chosen_profile)
 
 if __name__ == '__main__':
     main()
