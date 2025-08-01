@@ -8,32 +8,74 @@ import os
 import configparser
 
 # --- Configuration ---
-def get_api_key():
-    """Reads the API key from config.ini."""
-    config = configparser.ConfigParser()
+def get_config():
+    """Reads configuration from config.ini and returns it as a dictionary."""
+    config_parser = configparser.ConfigParser()
+    config = {
+        'api_key': None,
+        'faction_share_default': '30',
+        'guaranteed_share_default': '10'
+    }
+
     if not os.path.exists('config.ini'):
-        print(" -> Error: config.ini file not found.")
-        print(" -> Please create it with your API key under the [TornAPI] section.")
+        print(" -> Error: config.ini file not found. Please create it.")
         return None
-        
-    config.read('config.ini')
-    
-    if 'TornAPI' in config and 'ApiKey' in config['TornAPI']:
-        key = config['TornAPI']['ApiKey']
+
+    config_parser.read('config.ini')
+
+    # Read API Key
+    if 'TornAPI' in config_parser and 'ApiKey' in config_parser['TornAPI']:
+        key = config_parser['TornAPI']['ApiKey']
         if key and key != 'YourActualApiKeyHere':
-            return key
+            config['api_key'] = key
+        else:
+            print(" -> Error: API key not set in config.ini.")
+            return None
+    else:
+        print(" -> Error: [TornAPI] section or ApiKey not found in config.ini.")
+        return None
+
+    # Read Defaults, but don't fail if they're missing
+    if 'Defaults' in config_parser:
+        config['faction_share_default'] = config_parser['Defaults'].get('FactionShare', config['faction_share_default'])
+        config['guaranteed_share_default'] = config_parser['Defaults'].get('GuaranteedShare', config['guaranteed_share_default'])
+
+    return config
+
+# --- Utility Functions ---
+def get_unique_filename(base_path):
+    """Checks if a file exists and returns a unique name by appending a number."""
+    if not os.path.exists(base_path):
+        return base_path
     
-    print(" -> Error: API key not found or not set in config.ini.")
-    print(" -> Please ensure your key is under [TornAPI] with the name ApiKey.")
-    return None
+    directory, filename = os.path.split(base_path)
+    name, ext = os.path.splitext(filename)
+    
+    counter = 2
+    while True:
+        new_name = f"{name}_{counter}{ext}"
+        new_path = os.path.join(directory, new_name)
+        if not os.path.exists(new_path):
+            return new_path
+        counter += 1
 
-API_KEY = get_api_key()
-if not API_KEY:
-    sys.exit(1)
+def prompt_for_numeric_input(prompt_message, default=None):
+    """Prompts the user for numeric input, allowing an optional default value."""
+    while True:
+        prompt_suffix = f" (default: {default})" if default is not None else ""
+        user_input = input(f"{prompt_message}{prompt_suffix}: ")
 
+        if user_input == "" and default is not None:
+            return str(default)
+        
+        cleaned_input = user_input.replace(',', '').replace('$', '')
+
+        if cleaned_input.isdigit():
+            return cleaned_input
+        else:
+            print(" -> Invalid input. Please enter a whole number or press Enter to use the default.")
 
 # --- API Fetching Functions ---
-
 def get_api_data(url):
     """Fetches data from a given Torn API URL."""
     try:
@@ -51,14 +93,14 @@ def get_api_data(url):
         print(" -> Error decoding JSON from response.")
         return None
 
-def get_war_details(war_id):
+def get_war_details(war_id, api_key):
     """Fetches the details of a specific ranked war."""
     print(f"Fetching details for War ID: {war_id}...")
-    url = f"https://api.torn.com/torn/{war_id}?selections=rankedwarreport&key={API_KEY}"
+    url = f"https://api.torn.com/torn/{war_id}?selections=rankedwarreport&key={api_key}"
     return get_api_data(url)
 
-def get_all_attacks(faction_id, start_timestamp, end_timestamp):
-    """Fetches all faction attacks within a given timeframe by paginating through the v1 API."""
+def get_all_attacks(faction_id, start_timestamp, end_timestamp, api_key):
+    """Fetches all faction attacks within a given timeframe."""
     start_str = datetime.fromtimestamp(start_timestamp).strftime('%Y-%m-%d %H:%M:%S')
     end_str = datetime.fromtimestamp(end_timestamp).strftime('%Y-%m-%d %H:%M:%S')
     print(f"Fetching all attack logs from {start_str} to {end_str}...")
@@ -66,7 +108,7 @@ def get_all_attacks(faction_id, start_timestamp, end_timestamp):
     current_from = start_timestamp
 
     while current_from < end_timestamp:
-        url = f"https://api.torn.com/faction/{faction_id}?selections=attacks&from={current_from}&to={end_timestamp}&key={API_KEY}"
+        url = f"https://api.torn.com/faction/{faction_id}?selections=attacks&from={current_from}&to={end_timestamp}&key={api_key}"
         data = get_api_data(url)
         if data and 'attacks' in data:
             attacks_chunk = list(data['attacks'].values())
@@ -76,7 +118,6 @@ def get_all_attacks(faction_id, start_timestamp, end_timestamp):
 
             last_timestamp = attacks_chunk[-1]['timestamp_ended']
             if last_timestamp > current_from:
-                 # **CHANGE 1: Corrected pagination logic**
                  current_from = last_timestamp
             else:
                  break
@@ -90,19 +131,7 @@ def get_all_attacks(faction_id, start_timestamp, end_timestamp):
     print(f"Unique attacks after de-duplication: {len(unique_attacks)}")
     return unique_attacks
 
-# --- Data Processing and Utility Functions ---
-
-def save_attacks_to_json(attacks_data, filename):
-    """Saves a list of attack data to a formatted JSON file."""
-    print(f"Saving {len(attacks_data)} counted attacks to {filename} for debugging...")
-    try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(attacks_data, f, indent=2)
-        print(f" -> Successfully saved {filename}")
-    except IOError as e:
-        print(f" -> Error saving JSON file: {e}")
-
-
+# --- Data Processing Functions ---
 def process_war_data(war_report, all_attacks, our_faction_id):
     """Processes the raw API data to calculate member contributions."""
     print("Processing war data...")
@@ -124,21 +153,12 @@ def process_war_data(war_report, all_attacks, our_faction_id):
     for member_id, member_details in our_members_in_war.items():
         member_stats[member_id] = {'respect_gained': 0, 'name': member_details.get('name', 'Unknown')}
 
-    counted_attacks_for_debug = []
-
     for attack in all_attacks:
-        if 'attacker_id' not in attack or 'defender_id' not in attack:
-            continue
-
         is_our_attack = (attack.get('attacker_faction') == our_faction_id and
                          attack.get('defender_faction') == opponent_faction_id)
-
         is_ranked_war_attack = attack.get('ranked_war') == 1
 
-        # **CHANGE 2: Simplified filter, relying on the 'ranked_war' flag**
         if is_our_attack and is_ranked_war_attack:
-            counted_attacks_for_debug.append(attack)
-
             attacker_id = str(attack['attacker_id'])
             respect_gain = attack.get('respect_gain', 0)
 
@@ -146,8 +166,6 @@ def process_war_data(war_report, all_attacks, our_faction_id):
                 member_stats[attacker_id]['respect_gained'] += respect_gain
             else:
                 member_stats[attacker_id] = {'respect_gained': respect_gain, 'name': attack.get('attacker_name', 'Unknown (Ex-member)')}
-
-    save_attacks_to_json(counted_attacks_for_debug, "counted_war_attacks.json")
 
     active_members = {mid: stats for mid, stats in member_stats.items() if stats['respect_gained'] > 0}
     sorted_stats = sorted(active_members.items(), key=lambda item: item[1]['respect_gained'], reverse=True)
@@ -160,53 +178,46 @@ def process_war_data(war_report, all_attacks, our_faction_id):
     }
 
 # --- HTML Generation Functions ---
-
-def generate_war_report_html(processed_data, war_id, prize_total):
+def generate_war_report_html(processed_data, war_id, prize_total, faction_share, guaranteed_share):
     """Generates the final HTML report file."""
     if not processed_data or not processed_data['member_stats']:
-        print("No participating members found with respect gained. HTML report will be empty.")
-        our_faction_name = processed_data.get('our_faction_name', 'Your Faction')
-        opponent_faction_name = processed_data.get('opponent_faction_name', 'Opponent')
-        total_respect_gained = 0
-        start_str = datetime.fromtimestamp(processed_data['war_details']['war']['start']).strftime('%Y-%m-%d %H:%M:%S') if processed_data.get('war_details') else 'N/A'
-        end_str = datetime.fromtimestamp(processed_data['war_details']['war']['end']).strftime('%Y-%m-%d %H:%M:%S') if processed_data.get('war_details') else 'N/A'
-        member_rows = '<tr><td colspan="7" class="p-3 text-center text-gray-400">No members gained respect in this war.</td></tr>'
-    else:
-        war_details = processed_data['war_details']
-        member_stats = processed_data['member_stats']
-        our_faction_name = processed_data['our_faction_name']
-        opponent_faction_name = processed_data['opponent_faction_name']
+        print("No participating members found with respect gained. Report generation skipped.")
+        return
 
-        start_str = datetime.fromtimestamp(war_details['war']['start']).strftime('%Y-%m-%d %H:%M:%S')
-        end_str = datetime.fromtimestamp(war_details['war']['end']).strftime('%Y-%m-%d %H:%M:%S')
+    war_details = processed_data['war_details']
+    member_stats = processed_data['member_stats']
+    our_faction_name = processed_data['our_faction_name']
+    opponent_faction_name = processed_data['opponent_faction_name']
 
-        total_respect_gained = sum(stats['respect_gained'] for _, stats in member_stats)
+    start_str = datetime.fromtimestamp(war_details['war']['start']).strftime('%Y-%m-%d %H:%M:%S')
+    end_str = datetime.fromtimestamp(war_details['war']['end']).strftime('%Y-%m-%d %H:%M:%S')
+    total_respect_gained = sum(stats['respect_gained'] for _, stats in member_stats)
 
-        member_rows = ""
-        for member_id, stats in member_stats:
-            respect_gained = stats['respect_gained']
-            respect_percent = (respect_gained / total_respect_gained * 100) if total_respect_gained > 0 else 0
-            member_rows += f"""
-                <tr class="table-row-light" data-respect="{respect_gained:.2f}" data-enabled="true" data-member-id="{member_id}" data-member-name="{stats['name']}">
-                    <td class="p-3">
-                        <button class="status-toggle p-1 rounded-full bg-green-500 hover:bg-green-600">
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                        </button>
-                    </td>
-                    <td class="p-3 cursor-pointer" onclick="copyMemberInfo(this, '{stats['name']}', '{member_id}')">
-                        <a href="https://www.torn.com/profiles.php?XID={member_id}" target="_blank" class="text-cyan-400 hover:underline">{stats['name']} [{member_id}]</a>
-                    </td>
-                    <td class="p-3 text-right">{respect_gained:,.2f}</td>
-                    <td class="p-3 text-right">{respect_percent:.2f}%</td>
-                    <td class="p-3 text-right text-yellow-400 font-semibold guaranteed-share">$0</td>
-                    <td class="p-3 text-right text-green-400 font-semibold participation-share">$0</td>
-                    <td class="p-3 text-right text-white font-bold total-prize">
-                        <a href="#" class="text-white hover:underline" onclick="event.preventDefault(); window.open('https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user&addMoneyTo={member_id}&money=' + Math.round(parseFloat(this.closest('tr').dataset.totalPrize)), '_blank'); highlightRow(this.closest('tr'));">
-                            $0
-                        </a>
-                    </td>
-                </tr>
-            """
+    member_rows = ""
+    for member_id, stats in member_stats:
+        respect_gained = stats['respect_gained']
+        respect_percent = (respect_gained / total_respect_gained * 100) if total_respect_gained > 0 else 0
+        member_rows += f"""
+            <tr class="table-row-light" data-respect="{respect_gained:.2f}" data-enabled="true" data-member-id="{member_id}" data-member-name="{stats['name']}">
+                <td class="p-3">
+                    <button class="status-toggle p-1 rounded-full bg-green-500 hover:bg-green-600">
+                        <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                    </button>
+                </td>
+                <td class="p-3 cursor-pointer" onclick="copyMemberInfo(this, '{stats['name']}', '{member_id}')">
+                    <a href="https://www.torn.com/profiles.php?XID={member_id}" target="_blank" class="text-cyan-400 hover:underline">{stats['name']} [{member_id}]</a>
+                </td>
+                <td class="p-3 text-right">{respect_gained:,.2f}</td>
+                <td class="p-3 text-right">{respect_percent:.2f}%</td>
+                <td class="p-3 text-right text-yellow-400 font-semibold guaranteed-share">$0</td>
+                <td class="p-3 text-right text-green-400 font-semibold participation-share">$0</td>
+                <td class="p-3 text-right text-white font-bold total-prize">
+                    <a href="#" class="text-white hover:underline" onclick="event.preventDefault(); window.open('https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user&addMoneyTo={member_id}&money=' + Math.round(parseFloat(this.closest('tr').dataset.totalPrize)), '_blank'); highlightRow(this.closest('tr'));">
+                        $0
+                    </a>
+                </td>
+            </tr>
+        """
 
     html = f"""
     <!DOCTYPE html>
@@ -254,14 +265,14 @@ def generate_war_report_html(processed_data, war_id, prize_total):
                     <div class="info-row">
                         <label for="factionShare" class="info-label">Faction Share:</label>
                         <div class="flex items-center">
-                            <input type="number" id="factionShare" class="config-input w-20 rounded-md p-1 text-white" value="">
+                            <input type="number" id="factionShare" class="config-input w-20 rounded-md p-1 text-white" value="{faction_share}">
                             <span class="ml-1">%</span>
                         </div>
                     </div>
                     <div class="info-row">
                         <label for="guaranteedShare" class="info-label">Guaranteed Share:</label>
                         <div class="flex items-center">
-                            <input type="number" id="guaranteedShare" class="config-input w-20 rounded-md p-1 text-white" value="">
+                            <input type="number" id="guaranteedShare" class="config-input w-20 rounded-md p-1 text-white" value="{guaranteed_share}">
                             <span class="ml-1">%</span>
                         </div>
                     </div>
@@ -283,9 +294,7 @@ def generate_war_report_html(processed_data, war_id, prize_total):
                                 <th class="p-3 text-right">Total Prize</th>
                             </tr>
                         </thead>
-                        <tbody id="member-table-body">
-                            {member_rows}
-                        </tbody>
+                        <tbody id="member-table-body">{member_rows}</tbody>
                         <tfoot>
                             <tr class="table-header font-bold">
                                 <td class="p-3" colspan="2">Total</td>
@@ -313,6 +322,9 @@ def generate_war_report_html(processed_data, war_id, prize_total):
             </div>
         </div>
         <script>
+            const warId = '{war_id}';
+            const storagePrefix = `warReport_${{warId}}_`;
+
             const prizeTotalInput = document.getElementById('prizeTotal');
             const factionShareInput = document.getElementById('factionShare');
             const guaranteedShareInput = document.getElementById('guaranteedShare');
@@ -323,14 +335,10 @@ def generate_war_report_html(processed_data, war_id, prize_total):
             const unlockIcon = document.getElementById('unlockIcon');
             const inputs = [prizeTotalInput, factionShareInput, guaranteedShareInput];
 
-            function formatNumber(n) {{
-                return n.replace(/\\D/g, "").replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ",");
-            }}
+            function formatNumber(n) {{ return n.replace(/\\D/g, "").replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ","); }}
             
             function calculatePayouts() {{
-                let totalRespect = 0;
-                let participantCount = 0;
-                
+                let totalRespect = 0, participantCount = 0;
                 memberRows.forEach(row => {{
                     if (row.dataset.enabled === 'true') {{
                         totalRespect += parseFloat(row.dataset.respect) || 0;
@@ -347,8 +355,7 @@ def generate_war_report_html(processed_data, war_id, prize_total):
                 const guaranteedPool = memberPool * (guaranteedSharePercent / 100);
                 const participationPool = memberPool - guaranteedPool;
                 
-                let totalGuaranteedPaid = 0;
-                let totalParticipationPaid = 0;
+                let totalGuaranteedPaid = 0, totalParticipationPaid = 0;
                 
                 memberRows.forEach(row => {{
                     if (row.dataset.enabled === 'true') {{
@@ -360,8 +367,6 @@ def generate_war_report_html(processed_data, war_id, prize_total):
                         
                         row.querySelector('.guaranteed-share').textContent = `$` + Math.round(guaranteedPayout).toLocaleString();
                         row.querySelector('.participation-share').textContent = `$` + Math.round(participationPayout).toLocaleString();
-                        
-                        // Store the total prize amount in a data attribute
                         row.dataset.totalPrize = Math.round(totalMemberPrize);
                         
                         const prizeLink = row.querySelector('.total-prize a');
@@ -373,7 +378,6 @@ def generate_war_report_html(processed_data, war_id, prize_total):
                     }} else {{
                         row.querySelector('.guaranteed-share').textContent = '$0';
                         row.querySelector('.participation-share').textContent = '$0';
-                        
                         const prizeLink = row.querySelector('.total-prize a');
                         prizeLink.textContent = '$0';
                         prizeLink.href = '#';
@@ -389,7 +393,6 @@ def generate_war_report_html(processed_data, war_id, prize_total):
             function togglePlayerStatus(button) {{
                 const row = button.closest('tr');
                 const isEnabled = row.dataset.enabled === 'true';
-                
                 if (isEnabled) {{
                     row.dataset.enabled = 'false';
                     button.classList.remove('bg-green-500', 'hover:bg-green-600');
@@ -405,151 +408,52 @@ def generate_war_report_html(processed_data, war_id, prize_total):
             }}
 
             let lastHighlightedRow = null;
-
             function highlightRow(row) {{
-                if (lastHighlightedRow) {{
-                    lastHighlightedRow.classList.remove('highlight-row');
-                }}
+                if (lastHighlightedRow) {{ lastHighlightedRow.classList.remove('highlight-row'); }}
                 row.classList.add('highlight-row');
                 lastHighlightedRow = row;
             }}
 
             function copyMemberInfo(element, memberName, memberId) {{
                 highlightRow(element.closest('tr'));
-                const textToCopy = `${{memberName}} [${{memberId}}]`;
-                navigator.clipboard.writeText(textToCopy).then(() => {{
-                    console.log('Copied member info:', textToCopy);
-                }}).catch(err => {{
-                    console.error('Failed to copy member info: ', err);
-                }});
+                navigator.clipboard.writeText(`${{memberName}} [${{memberId}}]`);
             }}
             
             function takeScreenshot() {{
                 const reportContainer = document.getElementById('report-container');
                 const buttonsParent = document.querySelector('.mt-8.flex');
-                
-                // Temporarily hide buttons for the screenshot
                 buttonsParent.style.display = 'none';
-                
-                html2canvas(reportContainer, {{
-                    backgroundColor: '#111827',
-                    windowWidth: reportContainer.scrollWidth,
-                    windowHeight: reportContainer.scrollHeight
-                }}).then(canvas => {{
-                    const link = document.createElement('a');
-                    link.download = 'war_report.png';
-                    link.href = canvas.toDataURL('image/png');
-                    link.click();
-                    
-                    // Show buttons again
-                    buttonsParent.style.display = 'flex';
-                }});
+                html2canvas(reportContainer, {{ backgroundColor: '#111827', windowWidth: reportContainer.scrollWidth, windowHeight: reportContainer.scrollHeight }})
+                    .then(canvas => {{
+                        const link = document.createElement('a');
+                        link.download = `war_report_${{warId}}.png`;
+                        link.href = canvas.toDataURL('image/png');
+                        link.click();
+                        buttonsParent.style.display = 'flex';
+                    }});
             }}
             
             function toggleLock(isLocked) {{
                 inputs.forEach(input => input.readOnly = isLocked);
-                lockIcon.classList.toggle('hidden', !isLocked);
-                unlockIcon.classList.toggle('hidden', isLocked);
-                if(isLocked) {{
-                    localStorage.setItem('warReportPrizeTotal', prizeTotalInput.value);
-                    localStorage.setItem('warReportFactionShare', factionShareInput.value);
-                    localStorage.setItem('warReportGuaranteedShare', guaranteedShareInput.value);
-                    localStorage.setItem('warReportLocked', 'true');
+                lockIcon.classList.toggle('hidden', isLocked);
+                unlockIcon.classList.toggle('hidden', !isLocked);
+                if (isLocked) {{
+                    localStorage.setItem(storagePrefix + 'prizeTotal', prizeTotalInput.value);
+                    localStorage.setItem(storagePrefix + 'factionShare', factionShareInput.value);
+                    localStorage.setItem(storagePrefix + 'guaranteedShare', guaranteedShareInput.value);
+                    localStorage.setItem(storagePrefix + 'locked', 'true');
                 }} else {{
-                    localStorage.removeItem('warReportLocked');
+                    localStorage.removeItem(storagePrefix + 'locked');
                 }}
             }}
             
             function loadFromStorage() {{
-                const isLocked = localStorage.getItem('warReportLocked') === 'true';
-                prizeTotalInput.value = formatNumber(localStorage.getItem('warReportPrizeTotal') || prizeTotalInput.value);
-                factionShareInput.value = localStorage.getItem('warReportFactionShare') || '';
-                guaranteedShareInput.value = localStorage.getItem('warReportGuaranteedShare') || '';
+                const isLocked = localStorage.getItem(storagePrefix + 'locked') === 'true';
+                prizeTotalInput.value = formatNumber(localStorage.getItem(storagePrefix + 'prizeTotal') || prizeTotalInput.value);
+                factionShareInput.value = localStorage.getItem(storagePrefix + 'factionShare') || factionShareInput.value;
+                guaranteedShareInput.value = localStorage.getItem(storagePrefix + 'guaranteedShare') || guaranteedShareInput.value;
                 toggleLock(isLocked);
                 calculatePayouts();
             }}
             
-            document.querySelectorAll('.status-toggle').forEach(button => {{
-                button.addEventListener('click', () => togglePlayerStatus(button));
-            }});
-            
-            prizeTotalInput.addEventListener('input', (e) => {{
-                const formatted = formatNumber(e.target.value);
-                e.target.value = formatted;
-                calculatePayouts();
-            }});
-            factionShareInput.addEventListener('input', calculatePayouts);
-            guaranteedShareInput.addEventListener('input', calculatePayouts);
-            lockButton.addEventListener('click', () => toggleLock(lockIcon.classList.contains('hidden')));
-            screenshotButton.addEventListener('click', takeScreenshot);
-            
-            window.onload = loadFromStorage;
-        </script>
-    </body>
-    </html>
-    """
-    
-    # Generate filename
-    opponent_name_safe = processed_data['opponent_faction_name'].replace(' ', '_').replace('[', '').replace(']', '')
-    filename = f"war_report_{war_id}_{opponent_name_safe}.html"
-
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(html)
-    print(f" -> Successfully generated {filename}")
-
-
-# --- Main Execution ---
-
-def main():
-    """Main function to generate the war report."""
-    parser = argparse.ArgumentParser(description="Generate a ranked war report for Torn.com.")
-    parser.add_argument("-w", "--war-id", type=int, help="The ranked war ID.")
-    parser.add_argument("-p", "--prize-total", type=int, help="The total prize money for the war.")
-    
-    args = parser.parse_args()
-
-    war_id = str(args.war_id)
-    prize_total = str(args.prize_total)
-
-    # Fallback to interactive input if arguments are not provided
-    if args.war_id is None:
-        war_id = input("Please enter the Ranked War ID: ")
-        if not war_id.isdigit():
-            print("Invalid War ID. Please enter a number.")
-            sys.exit(1)
-            
-    if args.prize_total is None:
-        prize_total_input = input("Please enter the Prize Total: ")
-        if not prize_total_input.isdigit():
-            print("Invalid Prize Total. Please enter a number.")
-            sys.exit(1)
-        prize_total = prize_total_input
-
-    war_report = get_war_details(war_id)
-    if not war_report or 'rankedwarreport' not in war_report:
-        print("Could not fetch war report. Check the War ID and API key.")
-        sys.exit(1)
-
-    user_data = get_api_data(f"https://api.torn.com/user/?selections=profile&key={API_KEY}")
-    if not user_data or 'faction' not in user_data or user_data['faction']['faction_id'] == 0:
-        print("Could not determine your faction ID. Ensure your API key is correct.")
-        sys.exit(1)
-        
-    our_faction_id = user_data['faction']['faction_id']
-    war_start_time = war_report['rankedwarreport']['war']['start']
-    war_end_time = war_report['rankedwarreport']['war']['end']
-    
-    # **CHANGE 3: Increased fetch padding to 330 seconds (5.5 minutes)**
-    fetch_start_time = war_start_time - 330
-    fetch_end_time = war_end_time + 330
-    
-    all_attacks = get_all_attacks(our_faction_id, fetch_start_time, fetch_end_time)
-    
-    # Pass only necessary data, no longer need to pass timestamps for filtering
-    processed_data = process_war_data(war_report, all_attacks, our_faction_id)
-
-    if processed_data:
-        generate_war_report_html(processed_data, war_id, prize_total)
-
-if __name__ == '__main__':
-    main()
+            document.querySelectorAll('.status-toggle').forEach(button => {{ button.addEventListener('click', () => togglePlayerS
