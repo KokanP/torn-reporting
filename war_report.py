@@ -11,7 +11,6 @@ import configparser
 def get_api_key():
     """Reads the API key from config.ini."""
     config = configparser.ConfigParser()
-    # Check if the config file exists
     if not os.path.exists('config.ini'):
         print(" -> Error: config.ini file not found.")
         print(" -> Please create it with your API key under the [TornAPI] section.")
@@ -19,7 +18,6 @@ def get_api_key():
         
     config.read('config.ini')
     
-    # Check for the section and key
     if 'TornAPI' in config and 'ApiKey' in config['TornAPI']:
         key = config['TornAPI']['ApiKey']
         if key and key != 'YourActualApiKeyHere':
@@ -78,7 +76,8 @@ def get_all_attacks(faction_id, start_timestamp, end_timestamp):
 
             last_timestamp = attacks_chunk[-1]['timestamp_ended']
             if last_timestamp > current_from:
-                 current_from = last_timestamp + 1
+                 # **CHANGE 1: Corrected pagination logic**
+                 current_from = last_timestamp
             else:
                  break
             print(f" -> Fetched {len(attacks_chunk)} attacks, advancing to timestamp {current_from}")
@@ -104,7 +103,7 @@ def save_attacks_to_json(attacks_data, filename):
         print(f" -> Error saving JSON file: {e}")
 
 
-def process_war_data(war_report, all_attacks, our_faction_id, start_time, end_time):
+def process_war_data(war_report, all_attacks, our_faction_id):
     """Processes the raw API data to calculate member contributions."""
     print("Processing war data...")
     war_data = war_report.get('rankedwarreport', {})
@@ -135,9 +134,9 @@ def process_war_data(war_report, all_attacks, our_faction_id, start_time, end_ti
                          attack.get('defender_faction') == opponent_faction_id)
 
         is_ranked_war_attack = attack.get('ranked_war') == 1
-        is_in_timeframe = start_time <= attack['timestamp_started'] <= end_time
 
-        if is_our_attack and is_ranked_war_attack and is_in_timeframe:
+        # **CHANGE 2: Simplified filter, relying on the 'ranked_war' flag**
+        if is_our_attack and is_ranked_war_attack:
             counted_attacks_for_debug.append(attack)
 
             attacker_id = str(attack['attacker_id'])
@@ -540,12 +539,14 @@ def main():
     war_start_time = war_report['rankedwarreport']['war']['start']
     war_end_time = war_report['rankedwarreport']['war']['end']
     
-    fetch_start_time = war_start_time - 60
-    fetch_end_time = war_end_time + 60
+    # **CHANGE 3: Increased fetch padding to 330 seconds (5.5 minutes)**
+    fetch_start_time = war_start_time - 330
+    fetch_end_time = war_end_time + 330
     
     all_attacks = get_all_attacks(our_faction_id, fetch_start_time, fetch_end_time)
     
-    processed_data = process_war_data(war_report, all_attacks, our_faction_id, fetch_start_time, fetch_end_time)
+    # Pass only necessary data, no longer need to pass timestamps for filtering
+    processed_data = process_war_data(war_report, all_attacks, our_faction_id)
 
     if processed_data:
         generate_war_report_html(processed_data, war_id, prize_total)
