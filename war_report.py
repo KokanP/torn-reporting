@@ -26,7 +26,7 @@ def get_config():
     # Read API Key
     if 'TornAPI' in config_parser and 'ApiKey' in config_parser['TornAPI']:
         key = config_parser['TornAPI']['ApiKey']
-        if key and key != 'YourActualApiKeyHere':
+        if key and key.strip() and key != 'YourActualApiKeyHere':
             config['api_key'] = key
         else:
             print(" -> Error: API key not set in config.ini.")
@@ -65,10 +65,10 @@ def prompt_for_numeric_input(prompt_message, default=None):
         prompt_suffix = f" (default: {default})" if default is not None else ""
         user_input = input(f"{prompt_message}{prompt_suffix}: ")
 
-        if user_input == "" and default is not None:
+        if user_input.strip() == "" and default is not None:
             return str(default)
         
-        cleaned_input = user_input.replace(',', '').replace('$', '')
+        cleaned_input = user_input.replace(',', '').replace('$', '').strip()
 
         if cleaned_input.isdigit():
             return cleaned_input
@@ -335,7 +335,7 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
             const unlockIcon = document.getElementById('unlockIcon');
             const inputs = [prizeTotalInput, factionShareInput, guaranteedShareInput];
 
-            function formatNumber(n) {{ return n.replace(/\\D/g, "").replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ","); }}
+            function formatNumber(n) {{ return n.toString().replace(/\\D/g, "").replace(/\\B(?=(\\d{{3}})+(?!\\d))/g, ","); }}
             
             function calculatePayouts() {{
                 let totalRespect = 0, participantCount = 0;
@@ -371,7 +371,7 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
                         
                         const prizeLink = row.querySelector('.total-prize a');
                         prizeLink.textContent = `$` + Math.round(totalMemberPrize).toLocaleString();
-                        prizeLink.href = `https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user&addMoneyTo=${{row.dataset.memberId}}&money=${{row.dataset.totalPrize}}`;
+                        prizeLink.href = `https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user&addMoneyTo=${{row.dataset.memberId}}&money=${{Math.round(totalMemberPrize)}}`;
                         
                         totalGuaranteedPaid += Math.round(guaranteedPayout);
                         totalParticipationPaid += Math.round(participationPayout);
@@ -456,4 +456,85 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
                 calculatePayouts();
             }}
             
-            document.querySelectorAll('.status-toggle').forEach(button => {{ button.addEventListener('click', () => togglePlayerS
+            document.querySelectorAll('.status-toggle').forEach(button => {{ button.addEventListener('click', () => togglePlayerStatus(button)); }});
+            
+            prizeTotalInput.addEventListener('input', (e) => {{
+                const formatted = formatNumber(e.target.value);
+                e.target.value = formatted;
+                calculatePayouts();
+            }});
+            factionShareInput.addEventListener('input', calculatePayouts);
+            guaranteedShareInput.addEventListener('input', calculatePayouts);
+            lockButton.addEventListener('click', () => toggleLock(!lockIcon.classList.contains('hidden')));
+            screenshotButton.addEventListener('click', takeScreenshot);
+            
+            window.onload = loadFromStorage;
+        </script>
+    </body>
+    </html>
+    """
+    
+    # Generate base filename
+    opponent_name_safe = processed_data['opponent_faction_name'].replace(' ', '_').replace('[', '').replace(']', '')
+    base_filename = f"war_report_{war_id}_{opponent_name_safe}.html"
+    
+    # Get a unique filename
+    unique_filename = get_unique_filename(base_filename)
+
+    with open(unique_filename, "w", encoding="utf-8") as f:
+        f.write(html)
+    print(f" -> Successfully generated {unique_filename}")
+
+
+# --- Main Execution ---
+def main():
+    """Main function to generate the war report."""
+    config = get_config()
+    if not config or not config.get('api_key'):
+        sys.exit(1)
+    
+    API_KEY = config['api_key']
+
+    parser = argparse.ArgumentParser(description="Generate a ranked war report for Torn.com.")
+    parser.add_argument("-w", "--war-id", type=str, help="The ranked war ID.")
+    args = parser.parse_args()
+
+    # --- Get War ID ---
+    if args.war_id:
+        war_id = args.war_id
+    else:
+        war_id = prompt_for_numeric_input("Please enter the Ranked War ID")
+    
+    # --- Get War Data ---
+    war_report = get_war_details(war_id, API_KEY)
+    if not war_report or 'rankedwarreport' not in war_report:
+        print("Could not fetch war report. Check the War ID and API key.")
+        sys.exit(1)
+
+    user_data = get_api_data(f"https://api.torn.com/user/?selections=profile&key={API_KEY}")
+    if not user_data or 'faction' not in user_data or user_data['faction']['faction_id'] == 0:
+        print("Could not determine your faction ID from the API key provided.")
+        sys.exit(1)
+        
+    our_faction_id = user_data['faction']['faction_id']
+    war_start_time = war_report['rankedwarreport']['war']['start']
+    war_end_time = war_report['rankedwarreport']['war']['end']
+    
+    fetch_start_time = war_start_time - 330
+    fetch_end_time = war_end_time + 330
+    
+    all_attacks = get_all_attacks(our_faction_id, fetch_start_time, fetch_end_time, API_KEY)
+    
+    processed_data = process_war_data(war_report, all_attacks, our_faction_id)
+
+    if processed_data:
+        # --- Get Optional Payout Parameters ---
+        print("\nPlease provide payout details (press Enter to use defaults):")
+        prize_total = prompt_for_numeric_input("Prize Total", default="0")
+        faction_share = prompt_for_numeric_input("Faction Share %", default=config['faction_share_default'])
+        guaranteed_share = prompt_for_numeric_input("Guaranteed Share %", default=config['guaranteed_share_default'])
+        
+        generate_war_report_html(processed_data, war_id, prize_total, faction_share, guaranteed_share)
+
+if __name__ == '__main__':
+    main()
