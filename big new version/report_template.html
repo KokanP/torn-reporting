@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>War Report: {{ our_faction_name }} vs {{ opponent_faction_name }} (War ID: {{ war_id }})</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card { background-color: #1f2937; border: 1px solid #374151; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .table-header { background-color: #374151; }
+        .table-row-light { background-color: #2b3544; }
+        .info-row { display: flex; align-items: center; padding: 0.5rem 0; }
+        .info-label { font-weight: bold; color: #9ca3af; margin-right: 1rem; flex-shrink: 0; min-width: 150px; }
+        .info-value { color: #ffffff; flex-grow: 1; }
+        .highlight-row { background-color: #4b5563; }
+        .text-red-400 { color: #f87171; }
+        .text-green-400 { color: #4ade80; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300 p-4 sm:p-8">
+    <div class="max-w-7xl mx-auto" id="report-container">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-white">Ranked War Payout Report</h1>
+            <h2 class="text-2xl text-cyan-400">{{ our_faction_name }} vs {{ opponent_faction_name }} (War ID: {{ war_id }})</h2>
+        </header>
+
+        <div class="card">
+             <div class="info-row">
+                <span class="info-label">Start Date:</span>
+                <span class="info-value">{{ start_str }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">End Date:</span>
+                <span class="info-value">{{ end_str }}</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="text-xl font-semibold text-white mb-4">Member Contributions & Payouts</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="table-header">
+                        <tr>
+                            <th class="p-3">Status</th>
+                            <th class="p-3">Member</th>
+                            <th class="p-3 text-right">Respect Gained</th>
+                            <th class="p-3 text-right">Respect Payout</th>
+                            <th class="p-3 text-right">Adjustments</th>
+                            <th class="p-3 text-right">Final Payout</th>
+                        </tr>
+                    </thead>
+                    <tbody id="member-table-body">
+                        {% for member_id, stats in member_stats %}
+                        <tr class="table-row-light" 
+                            data-enabled="true" 
+                            data-member-id="{{ member_id }}" 
+                            data-respect-payout="{{ '%.0f'|format(stats.respect_payout) }}"
+                            data-adjustments="{{ '%.0f'|format(stats.adjustments) }}"
+                            data-final-payout="{{ '%.0f'|format(stats.final_payout) }}">
+                            <td class="p-3">
+                                <button class="status-toggle p-1 rounded-full bg-green-500 hover:bg-green-600">
+                                    <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                </button>
+                            </td>
+                            <td class="p-3 cursor-pointer" onclick="copyMemberInfo(this, '{{ stats.name }}', '{{ member_id }}')">
+                                <a href="https://www.torn.com/profiles.php?XID={{ member_id }}" target="_blank" class="text-cyan-400 hover:underline">{{ stats.name }} [{{ member_id }}]</a>
+                            </td>
+                            <td class="p-3 text-right">{{ '%.2f'|format(stats.respect_gained) }}</td>
+                            <td class="p-3 text-right text-yellow-400 font-semibold respect-payout">${{ "{:,.0f}".format(stats.respect_payout) }}</td>
+                            <td class="p-3 text-right font-semibold {% if stats.adjustments < 0 %}text-red-400{% else %}text-green-400{% endif %} adjustments">${{ "{:,.0f}".format(stats.adjustments) }}</td>
+                            <td class="p-3 text-right text-white font-bold total-prize">
+                                <a href="https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user&addMoneyTo={{ member_id }}&money={{ '%.0f'|format(stats.final_payout) }}" target="_blank" class="text-white hover:underline" onclick="highlightRow(this.closest('tr'));">
+                                    ${{ "{:,.0f}".format(stats.final_payout) }}
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="table-header font-bold">
+                            <td class="p-3" colspan="3">Total (for enabled members)</td>
+                            <td id="total-respect-payout" class="p-3 text-right">${{ "{:,.0f}".format(total_respect_payout) }}</td>
+                            <td id="total-adjustments" class="p-3 text-right">${{ "{:,.0f}".format(total_adjustments) }}</td>
+                            <td id="total-final-payout" class="p-3 text-right">${{ "{:,.0f}".format(total_final_payout) }}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <div class="mt-8 flex justify-center space-x-4">
+             <button id="screenshotButton" class="p-4 rounded-md bg-blue-600 hover:bg-blue-700" title="Download Screenshot">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd" />
+                </svg>
+            </button>
+        </div>
+    </div>
+    <script>
+        const warId = '{{ war_id }}';
+
+        function updateTotals() {
+            const memberRows = document.querySelectorAll('#member-table-body tr');
+            let totalRespectPayout = 0;
+            let totalAdjustments = 0;
+            let totalFinalPayout = 0;
+
+            memberRows.forEach(row => {
+                if (row.dataset.enabled === 'true') {
+                    totalRespectPayout += parseFloat(row.dataset.respectPayout) || 0;
+                    totalAdjustments += parseFloat(row.dataset.adjustments) || 0;
+                    totalFinalPayout += parseFloat(row.dataset.finalPayout) || 0;
+                }
+            });
+
+            document.getElementById('total-respect-payout').textContent = `$` + Math.round(totalRespectPayout).toLocaleString();
+            document.getElementById('total-adjustments').textContent = `$` + Math.round(totalAdjustments).toLocaleString();
+            document.getElementById('total-final-payout').textContent = `$` + Math.round(totalFinalPayout).toLocaleString();
+        }
+        
+        function togglePlayerStatus(button) {
+            const row = button.closest('tr');
+            const isEnabled = row.dataset.enabled === 'true';
+            if (isEnabled) {
+                row.dataset.enabled = 'false';
+                button.classList.remove('bg-green-500', 'hover:bg-green-600');
+                button.classList.add('bg-red-500', 'hover:bg-red-600');
+                button.innerHTML = `<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`;
+                row.style.opacity = '0.5';
+            } else {
+                row.dataset.enabled = 'true';
+                button.classList.remove('bg-red-500', 'hover:bg-red-600');
+                button.classList.add('bg-green-500', 'hover:bg-green-600');
+                button.innerHTML = `<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
+                row.style.opacity = '1.0';
+            }
+            updateTotals();
+        }
+
+        let lastHighlightedRow = null;
+        function highlightRow(row) {
+            if (lastHighlightedRow) { lastHighlightedRow.classList.remove('highlight-row'); }
+            row.classList.add('highlight-row');
+            lastHighlightedRow = row;
+        }
+
+        function copyMemberInfo(element, memberName, memberId) {
+            highlightRow(element.closest('tr'));
+            navigator.clipboard.writeText(`${memberName} [${memberId}]`);
+        }
+        
+        function takeScreenshot() {
+            const reportContainer = document.getElementById('report-container');
+            const buttonsParent = document.querySelector('.mt-8.flex');
+            buttonsParent.style.display = 'none';
+            html2canvas(reportContainer, { backgroundColor: '#111827', windowWidth: reportContainer.scrollWidth, windowHeight: reportContainer.scrollHeight })
+                .then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = `war_report_${warId}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                    buttonsParent.style.display = 'flex';
+                });
+        }
+        
+        document.querySelectorAll('.status-toggle').forEach(button => { button.addEventListener('click', () => togglePlayerStatus(button)); });
+        document.getElementById('screenshotButton').addEventListener('click', takeScreenshot);
+        
+        window.onload = updateTotals;
+    </script>
+</body>
+</html>

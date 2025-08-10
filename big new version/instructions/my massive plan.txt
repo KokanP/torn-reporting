@@ -1,0 +1,199 @@
+Comprehensive 4-Stage Plan for Upgrading the War Report Tool
+This document outlines a sequential, four-stage plan to upgrade the Torn war reporting tool. Each stage builds upon the previous one. For best results, provide the instructions for only one stage at a time to the LLM, using the successful code output from the prior stage as the input for the next.
+
+Stage 1: Build the Core Data Engine
+Goal: Upgrade war_report.py to process the entire attack log and calculate a comprehensive set of offensive and defensive statistics for each member. This stage focuses only on data processing, not on presentation or new options.
+
+Files to Modify:
+
+war_report.py
+
+"Do Not Touch" List:
+
+DO NOT modify report_template.html.
+
+DO NOT add any new command-line arguments or interactive prompts in this stage.
+
+DO NOT change the existing generate_war_report_html function yet.
+
+Detailed Instructions for Stage 1:
+
+Focus on the process_war_data function in war_report.py.
+
+Expand the member_stats dictionary. When initializing the dictionary for each member, modify its structure to be the following:
+
+{
+    'name': member_details.get('name', 'Unknown'),
+    'respect_gained': 0.0,
+    'base_respect_gained': 0.0,
+    'hits_made': 0,
+    'assists': 0,
+    'hits_taken': 0, # This is for losses
+    'defends': 0,    # This is for successful defends
+    'stalemates': 0
+}
+
+Enhance the attack processing loop. Iterate through all_attacks and correctly identify both offensive and defensive actions that are part of the ranked war.
+
+For Offensive Actions (Our member is the attacker):
+
+Condition: attack.get('attacker_faction') == our_faction_id and attack.get('defender_faction') == opponent_faction_id and attack.get('ranked_war') == 1.
+
+If the condition is met for a member in member_stats:
+
+Increment hits_made.
+
+Add the respect_gain to the member's respect_gained.
+
+Calculate base_respect by dividing respect_gain by the chain_bonus modifier. The chain bonus is at attack.get('modifiers', {}).get('chain_bonus', 1.0). Default to 1.0 to ensure float division and prevent errors if the key is missing. Add this value to base_respect_gained.
+
+If attack.get('result') == 'Assist', increment assists.
+
+For Defensive Actions (Our member is the defender):
+
+Condition: attack.get('defender_faction') == our_faction_id and attack.get('attacker_faction') == opponent_faction_id and attack.get('ranked_war') == 1.
+
+If the condition is met for a member in member_stats:
+
+If attack.get('result') == 'Lost', increment hits_taken.
+
+If attack.get('result') == 'Stalemate', increment stalemates.
+
+If attack.get('result') is anything else (e.g., 'Attacked', 'Hospitalize'), it's a successful defend. Increment defends.
+
+Update the final sort. For now, continue to sort the active_members by the original respect_gained key.
+
+Expected Outcome for Stage 1: The war_report.py script now internally calculates all the new stats. The processed_data dictionary it produces contains this rich information, even though the final HTML report doesn't show it yet. The script should run without errors.
+
+Stage 2: Implement Presets & Final Calculations
+Goal: Introduce config.ini presets and create a central calculation function in war_report.py to handle all the new financial logic based on user-selected settings.
+
+Files to Modify:
+
+war_report.py
+
+config.ini (You will add examples for the LLM to understand)
+
+"Do Not Touch" List:
+
+DO NOT modify report_template.html or generate_war_report_html yet.
+
+Detailed Instructions for Stage 2:
+
+Update config.ini with preset examples. Add new sections like the following:
+
+[Preset_Standard]
+use_bonus_respect = true
+assist_payment_type = none
+assist_payment_value = 0
+penalty_per_hit_taken = 0
+
+[Preset_NoBonus_AssistsFlat]
+use_bonus_respect = false
+assist_payment_type = flat
+assist_payment_value = 250000
+penalty_per_hit_taken = 0
+
+[Preset_Penalties]
+use_bonus_respect = false
+assist_payment_type = none
+assist_payment_value = 0
+penalty_per_hit_taken = 500000 
+
+Modify get_config in war_report.py to read these new preset sections and store them within the main config dictionary.
+
+Add a new command-line argument: --preset which takes a string (e.g., Preset_Standard).
+
+Create a new function: calculate_final_payouts(settings, member_stats, prize_total). This will be the new financial engine.
+
+It takes the active settings (from a preset or flags), the member_stats from Stage 1, and the prize_total.
+
+Inside this function:
+
+Determine the member_pool after the faction share.
+
+Calculate the total penalty_pool by multiplying settings['penalty_per_hit_taken'] by the total hits_taken across all members.
+
+Calculate the total assist_payout_pool based on the assist_payment_type and assist_payment_value.
+
+Subtract these two pools from the member_pool to get the final participation_pool.
+
+Determine the respect metric to use: if settings['use_bonus_respect'] is true, use respect_gained; otherwise, use base_respect_gained.
+
+Calculate each member's final payout by adding their share of the participation pool, their assist payout, and subtracting their penalty.
+
+The function should return the member_stats dictionary, but now with new keys for each member: final_payout, assist_payout, penalty_amount, etc.
+
+Modify the main function. After process_war_data runs, call your new calculate_final_payouts function to get the final numbers.
+
+Expected Outcome for Stage 2: The script can now be run with a --preset flag. It performs all the complex financial calculations internally and has the final dollar amounts ready for each member.
+
+Stage 3: Update the Simple Payout Report
+Goal: Connect the new calculation engine to the existing report_template.html, keeping the report's appearance clean and simple for easy sharing.
+
+Files to Modify:
+
+war_report.py
+
+report_template.html
+
+Detailed Instructions for Stage 3:
+
+Modify generate_war_report_html in war_report.py.
+
+This function will now receive the fully calculated data (with final_payout etc.) from Stage 2.
+
+Update the context dictionary to pass these final calculated dollar amounts to the template.
+
+Update report_template.html.
+
+The goal is simplicity. Do not add a dozen new columns.
+
+Modify the main table. You can replace the "Guaranteed Share" and "Participation Share" columns with a single, clearer column like "Respect Payout".
+
+Add one new column: "Adjustments". This column will show the net result of assist bonuses and defensive penalties for each member.
+
+The "Total Prize" column will now display the final_payout value calculated by Python.
+
+Simplify the JavaScript. The complex calculatePayouts() JavaScript function is no longer needed, as Python now does all the math. The JavaScript should only be responsible for:
+
+Toggling a player's status on/off.
+
+Recalculating the column totals in the footer when a player is toggled.
+
+Handling the screenshot and lock buttons.
+
+Expected Outcome for Stage 3: The script generates the simple HTML report. The numbers are now based on the advanced preset logic, but the visual presentation remains clean and focused on the final payout.
+
+Stage 4: Create the Advanced Analysis Report
+Goal: Create a second, separate, and highly detailed HTML report for in-depth performance analysis, generating it alongside the simple report.
+
+Files to Modify:
+
+war_report.py
+
+A new file to be created: advanced_report_template.html
+
+Detailed Instructions for Stage 4:
+
+Create a new template file: advanced_report_template.html. Instruct the LLM to design this file. It should include:
+
+A high-level summary box at the top (Total Respect, Top Earner, etc.).
+
+A detailed main table that displays all the metrics calculated in Stage 1: hits_made, assists, hits_taken, defends, stalemates, base_respect, etc.
+
+It should also show the full payout breakdown: participation_payout, assist_payout, penalty, and final_payout.
+
+(Optional Stretch Goal) A button to export the table data to CSV format.
+
+In war_report.py, create a new function: generate_advanced_report_html(...).
+
+This function will be very similar to the existing one but will use the new advanced_report_template.html.
+
+It will take the rich processed_data from Stage 1 and the final calculated data from Stage 2 and pass it all to the new template.
+
+Modify the main function. At the end of the script, call both generate_war_report_html and the new generate_advanced_report_html to create both files in a single run.
+
+(Optional) Add a command-line flag like --advanced-only if you want to generate just the detailed report.
+
+Expected Outcome for Stage 4: Running the script now produces two separate HTML files: the simple war_report_...html for payouts and a new advanced_report_...html for deep analysis.

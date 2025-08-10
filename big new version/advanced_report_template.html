@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced War Analysis: {{ our_faction_name }} vs {{ opponent_faction_name }} (War ID: {{ war_id }})</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card { background-color: #1f2937; border: 1px solid #374151; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .table-header { background-color: #374151; }
+        .table-subheader { background-color: #2b3544; }
+        .table-row-light { background-color: #2b3544; }
+        .table-row-dark { background-color: #1f2937; }
+        .stat-card { background-color: #2b3544; padding: 1rem; border-radius: 0.5rem; text-align: center; }
+        .stat-label { color: #9ca3af; font-size: 0.875rem; }
+        .stat-value { color: #ffffff; font-size: 1.25rem; font-weight: bold; }
+        .text-red-400 { color: #f87171; }
+        .text-green-400 { color: #4ade80; }
+        .text-yellow-400 { color: #facc15; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300 p-4 sm:p-8">
+    <div class="max-w-screen-xl mx-auto" id="report-container">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-white">Ranked War: Advanced Analysis</h1>
+            <h2 class="text-2xl text-cyan-400">{{ our_faction_name }} vs {{ opponent_faction_name }} (War ID: {{ war_id }})</h2>
+        </header>
+
+        <div class="card">
+            <h3 class="text-xl font-semibold text-white mb-4">War Summary</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="stat-card">
+                    <div class="stat-label">Top Earner</div>
+                    <div class="stat-value">{{ top_earner.name }}</div>
+                    <div class="stat-label">${{ "{:,.0f}".format(top_earner.payout) }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Top Hitter</div>
+                    <div class="stat-value">{{ top_hitter.name }}</div>
+                    <div class="stat-label">{{ top_hitter.hits }} hits</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Hits Made</div>
+                    <div class="stat-value">{{ "{:,.0f}".format(totals.hits_made) }}</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Respect Gained</div>
+                    <div class="stat-value">{{ "{:,.2f}".format(totals.respect_gained) }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="text-xl font-semibold text-white mb-4">Detailed Member Statistics</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left" id="advanced-table">
+                    <thead class="table-header text-xs uppercase">
+                        <tr>
+                            <th rowspan="2" class="p-3">Member</th>
+                            <th colspan="6" class="p-3 text-center">Performance Stats</th>
+                            <th colspan="5" class="p-3 text-center">Financial Breakdown</th>
+                        </tr>
+                        <tr class="table-subheader">
+                            <th class="p-2 text-right">Hits</th>
+                            <th class="p-2 text-right">Defends</th>
+                            <th class="p-2 text-right">Assists</th>
+                            <th class="p-2 text-right">Losses</th>
+                            <th class="p-2 text-right">Stales</th>
+                            <th class="p-2 text-right">Bonus<br>Respect</th>
+                            <th class="p-2 text-right">Guaranteed</th>
+                            <th class="p-2 text-right">Participation</th>
+                            <th class="p-2 text-right">Assist Bonus</th>
+                            <th class="p-2 text-right">Penalty</th>
+                            <th class="p-2 text-right">Final Payout</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for member_id, stats in member_stats %}
+                        <tr class="{{ 'table-row-light' if loop.index is odd else 'table-row-dark' }}">
+                            <td class="p-2 font-semibold">
+                                <a href="https://www.torn.com/profiles.php?XID={{ member_id }}" target="_blank" class="text-cyan-400 hover:underline">{{ stats.name }}</a>
+                            </td>
+                            <td class="p-2 text-right">{{ stats.hits_made }}</td>
+                            <td class="p-2 text-right text-green-400">{{ stats.defends }}</td>
+                            <td class="p-2 text-right">{{ stats.assists }}</td>
+                            <td class="p-2 text-right text-red-400">{{ stats.hits_taken }}</td>
+                            <td class="p-2 text-right">{{ stats.stalemates }}</td>
+                            <td class="p-2 text-right text-yellow-400">{{ "%.2f"|format(stats.respect_gained) }}</td>
+                            <td class="p-2 text-right">${{ "{:,.0f}".format(stats.guaranteed_payout) }}</td>
+                            <td class="p-2 text-right">${{ "{:,.0f}".format(stats.participation_payout) }}</td>
+                            <td class="p-2 text-right text-green-400">${{ "{:,.0f}".format(stats.assist_payout) }}</td>
+                            <td class="p-2 text-right text-red-400">(${{ "{:,.0f}".format(stats.penalty_amount) }})</td>
+                            <td class="p-2 text-right font-bold text-white">${{ "{:,.0f}".format(stats.final_payout) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot class="table-header font-bold">
+                        <tr>
+                            <td class="p-2">Total</td>
+                            <td class="p-2 text-right">{{ "{:,.0f}".format(totals.hits_made) }}</td>
+                            <td class="p-2 text-right">{{ "{:,.0f}".format(totals.defends) }}</td>
+                            <td class="p-2 text-right">{{ "{:,.0f}".format(totals.assists) }}</td>
+                            <td class="p-2 text-right">{{ "{:,.0f}".format(totals.hits_taken) }}</td>
+                            <td class="p-2 text-right">{{ "{:,.0f}".format(totals.stalemates) }}</td>
+                            <td class="p-2 text-right">{{ "%.2f"|format(totals.respect_gained) }}</td>
+                            <td class="p-2 text-right">${{ "{:,.0f}".format(totals.guaranteed_payout) }}</td>
+                            <td class="p-2 text-right">${{ "{:,.0f}".format(totals.participation_payout) }}</td>
+                            <td class="p-2 text-right">${{ "{:,.0f}".format(totals.assist_payout) }}</td>
+                            <td class="p-2 text-right">(${{ "{:,.0f}".format(totals.penalty_amount) }})</td>
+                            <td class="p-2 text-right">${{ "{:,.0f}".format(totals.final_payout) }}</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <div class="mt-8 flex justify-center space-x-4">
+             <button id="csvButton" class="p-4 rounded-md bg-green-700 hover:bg-green-800" title="Export to CSV">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+            </button>
+            <button id="screenshotButton" class="p-4 rounded-md bg-blue-600 hover:bg-blue-700" title="Download Screenshot">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd" />
+                </svg>
+            </button>
+        </div>
+    </div>
+    <script>
+        function takeScreenshot() {
+            const reportContainer = document.getElementById('report-container');
+            const buttonsParent = document.querySelector('.mt-8.flex');
+            buttonsParent.style.display = 'none';
+            html2canvas(reportContainer, { backgroundColor: '#111827', windowWidth: reportContainer.scrollWidth, windowHeight: reportContainer.scrollHeight })
+                .then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = `advanced_war_report_{{ war_id }}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                    buttonsParent.style.display = 'flex';
+                });
+        }
+
+        function exportTableToCSV(filename) {
+            let csv = [];
+            const table = document.getElementById("advanced-table");
+            const headers = [];
+            // Get main headers, accounting for colspan
+            table.querySelectorAll("thead tr:first-child th").forEach(th => {
+                const text = th.textContent.trim();
+                const colspan = th.colSpan || 1;
+                headers.push(text);
+                for(let i = 1; i < colspan; i++) { headers.push(''); }
+            });
+            csv.push(headers.join(','));
+
+            const subHeaders = [];
+            // Get subheaders
+            table.querySelectorAll("thead tr:last-child th").forEach(th => {
+                subHeaders.push('"' + th.textContent.trim().replace(/<br>/g, ' ') + '"');
+            });
+            csv.push(subHeaders.join(','));
+
+            // Get rows
+            table.querySelectorAll("tbody tr").forEach(row => {
+                const rowData = [];
+                row.querySelectorAll("td").forEach(td => {
+                    rowData.push('"' + td.textContent.trim().replace(/\$|,|\(|\)/g, '') + '"');
+                });
+                csv.push(rowData.join(','));
+            });
+
+             // Get footer
+            const footerData = [];
+            table.querySelectorAll("tfoot tr td").forEach(td => {
+                 footerData.push('"' + td.textContent.trim().replace(/\$|,|\(|\)/g, '') + '"');
+            });
+            csv.push(footerData.join(','))
+
+
+            const csvFile = new Blob([csv.join("\n")], { type: "text/csv" });
+            const downloadLink = document.createElement("a");
+            downloadLink.download = filename;
+            downloadLink.href = window.URL.createObjectURL(csvFile);
+            downloadLink.style.display = "none";
+            document.body.appendChild(downloadLink);
+            downloadLink.click();
+        }
+
+        document.getElementById('screenshotButton').addEventListener('click', takeScreenshot);
+        document.getElementById('csvButton').addEventListener('click', () => {
+             exportTableToCSV('advanced_war_report_{{ war_id }}.csv');
+        });
+    </script>
+</body>
+</html>

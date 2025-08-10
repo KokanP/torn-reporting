@@ -9,10 +9,6 @@ import configparser
 import logging
 from jinja2 import Environment, FileSystemLoader
 
-# Define constants for directories
-CACHE_DIR = 'cache'
-REPORTS_DIR = 'reports'
-
 # --- Configuration ---
 def get_config():
     """Reads configuration from config.ini and returns it as a dictionary."""
@@ -159,20 +155,19 @@ def process_war_data(war_report, all_attacks, our_faction_id):
     for member_id, member_details in our_members_in_war.items():
         member_stats[member_id] = {'respect_gained': 0, 'name': member_details.get('name', 'Unknown')}
 
-    if all_attacks:
-        for attack in all_attacks:
-            is_our_attack = (attack.get('attacker_faction') == our_faction_id and
-                             attack.get('defender_faction') == opponent_faction_id)
-            is_ranked_war_attack = attack.get('ranked_war') == 1
+    for attack in all_attacks:
+        is_our_attack = (attack.get('attacker_faction') == our_faction_id and
+                         attack.get('defender_faction') == opponent_faction_id)
+        is_ranked_war_attack = attack.get('ranked_war') == 1
 
-            if is_our_attack and is_ranked_war_attack:
-                attacker_id = str(attack['attacker_id'])
-                respect_gain = attack.get('respect_gain', 0)
+        if is_our_attack and is_ranked_war_attack:
+            attacker_id = str(attack['attacker_id'])
+            respect_gain = attack.get('respect_gain', 0)
 
-                if attacker_id in member_stats:
-                    member_stats[attacker_id]['respect_gained'] += respect_gain
-                else:
-                    member_stats[attacker_id] = {'respect_gained': respect_gain, 'name': attack.get('attacker_name', 'Unknown (Ex-member)')}
+            if attacker_id in member_stats:
+                member_stats[attacker_id]['respect_gained'] += respect_gain
+            else:
+                member_stats[attacker_id] = {'respect_gained': respect_gain, 'name': attack.get('attacker_name', 'Unknown (Ex-member)')}
 
     active_members = {mid: stats for mid, stats in member_stats.items() if stats['respect_gained'] > 0}
     sorted_stats = sorted(active_members.items(), key=lambda item: item[1]['respect_gained'], reverse=True)
@@ -191,6 +186,7 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
         logging.warning("No participating members found with respect gained. Report generation skipped.")
         return
 
+    # Set up Jinja2 environment
     env = Environment(loader=FileSystemLoader('.'))
     try:
         template = env.get_template('report_template.html')
@@ -198,6 +194,7 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
         logging.error("report_template.html not found in the script's directory.")
         return
 
+    # Prepare data for the template
     war_details = processed_data['war_details']
     context = {
         'war_id': war_id,
@@ -212,13 +209,15 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
         'total_respect_gained': sum(stats['respect_gained'] for _, stats in processed_data['member_stats'])
     }
 
+    # Render the template with the data
     html_content = template.render(context)
     
+    # Generate a unique filename
     opponent_name_safe = processed_data['opponent_faction_name'].replace(' ', '_').replace('[', '').replace(']', '')
     base_filename = f"war_report_{war_id}_{opponent_name_safe}.html"
-    report_path = os.path.join(REPORTS_DIR, base_filename)
-    unique_filename = get_unique_filename(report_path)
+    unique_filename = get_unique_filename(base_filename)
 
+    # Write the rendered HTML to the file
     with open(unique_filename, "w", encoding="utf-8") as f:
         f.write(html_content)
     logging.info(f"Successfully generated {unique_filename}")
@@ -227,10 +226,8 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
 # --- Main Execution ---
 def main():
     """Main function to generate the war report."""
+    # Configure logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-
-    os.makedirs(CACHE_DIR, exist_ok=True)
-    os.makedirs(REPORTS_DIR, exist_ok=True)
 
     config = get_config()
     if not config or not config.get('api_key'):
@@ -238,49 +235,20 @@ def main():
     
     API_KEY = config['api_key']
 
-    # --- Argument Parsing ---
-    parser = argparse.ArgumentParser(
-        description="Generate a ranked war report for Torn.com.",
-        formatter_class=argparse.RawTextHelpFormatter,
-        epilog="""
-Usage Examples:
------------------
-1. Interactive Mode (will prompt for all inputs):
-   python war_report.py
-
-2. Basic Report (using default shares from config.ini):
-   python war_report.py 28997
-
-3. Report with Custom Payouts:
-   python war_report.py 28997 --prize-total 1000000000 --faction-share 25 --guaranteed-share 5
-
-4. Force Refresh (ignore and overwrite cache):
-   python war_report.py 28997 --no-cache
-"""
-    )
-    parser.add_argument('war_id', nargs='?', default=None, help='The ranked war ID. Required for non-interactive mode.')
-    parser.add_argument('-p', '--prize-total', type=str, help='The total prize money for the war (e.g., 1000000000).')
-    parser.add_argument('-f', '--faction-share', type=str, help=f"The percentage of the prize the faction keeps. Default: {config['faction_share_default']}%%")
-    parser.add_argument('-g', '--guaranteed-share', type=str, help=f"The percentage of the member pool for guaranteed payouts. Default: {config['guaranteed_share_default']}%%")
-    parser.add_argument('--no-cache', action='store_true', help='Ignore existing cache and fetch fresh attack data from the API.')
-    
+    parser = argparse.ArgumentParser(description="Generate a ranked war report for Torn.com.")
+    parser.add_argument("-w", "--war-id", type=str, help="The ranked war ID.")
     args = parser.parse_args()
 
-    # --- Determine Mode (Interactive vs. Argument-driven) ---
+    # --- Get ALL user inputs first ---
     if args.war_id:
-        # Argument-driven mode
         war_id = args.war_id
-        prize_total = args.prize_total if args.prize_total is not None else "0"
-        faction_share = args.faction_share if args.faction_share is not None else config['faction_share_default']
-        guaranteed_share = args.guaranteed_share if args.guaranteed_share is not None else config['guaranteed_share_default']
     else:
-        # Interactive mode
-        logging.info("No War ID provided. Entering interactive mode.")
         war_id = prompt_for_numeric_input("Please enter the Ranked War ID")
-        logging.info("Please provide payout details (press Enter to use defaults):")
-        prize_total = prompt_for_numeric_input("Prize Total", default="0")
-        faction_share = prompt_for_numeric_input("Faction Share %", default=config['faction_share_default'])
-        guaranteed_share = prompt_for_numeric_input("Guaranteed Share %", default=config['guaranteed_share_default'])
+    
+    logging.info("Please provide payout details (press Enter to use defaults):")
+    prize_total = prompt_for_numeric_input("Prize Total", default="0")
+    faction_share = prompt_for_numeric_input("Faction Share %", default=config['faction_share_default'])
+    guaranteed_share = prompt_for_numeric_input("Guaranteed Share %", default=config['guaranteed_share_default'])
     
     # --- Start processing and API calls ---
     war_report = get_war_details(war_id, API_KEY)
@@ -297,30 +265,10 @@ Usage Examples:
     war_start_time = war_report['rankedwarreport']['war']['start']
     war_end_time = war_report['rankedwarreport']['war']['end']
     
-    # --- Caching logic for attack logs ---
-    cache_file_path = os.path.join(CACHE_DIR, f"war_hits_cache_{war_id}.json")
-    all_attacks = None
-
-    if not args.no_cache and os.path.exists(cache_file_path):
-        logging.info(f"Loading attack data from cache: {cache_file_path}")
-        try:
-            with open(cache_file_path, 'r', encoding='utf-8') as f:
-                all_attacks = json.load(f)
-            logging.info(f"Successfully loaded {len(all_attacks)} unique attacks from cache.")
-        except (json.JSONDecodeError, IOError) as e:
-            logging.warning(f"Could not read cache file {cache_file_path}: {e}. Refetching from API.")
-            all_attacks = None
-
-    if all_attacks is None:
-        logging.info("Cache not found or invalid. Fetching attacks from API...")
-        fetch_start_time = war_start_time - 330
-        fetch_end_time = war_end_time + 330
-        all_attacks = get_all_attacks(our_faction_id, fetch_start_time, fetch_end_time, API_KEY)
-        
-        if all_attacks:
-            logging.info(f"Saving attack data to cache: {cache_file_path}")
-            with open(cache_file_path, 'w', encoding='utf-8') as f:
-                json.dump(all_attacks, f, indent=4)
+    fetch_start_time = war_start_time - 330
+    fetch_end_time = war_end_time + 330
+    
+    all_attacks = get_all_attacks(our_faction_id, fetch_start_time, fetch_end_time, API_KEY)
     
     processed_data = process_war_data(war_report, all_attacks, our_faction_id)
 

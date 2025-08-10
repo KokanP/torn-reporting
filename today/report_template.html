@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>War Report: {{ our_faction_name }} vs {{ opponent_faction_name }} (War ID: {{ war_id }})</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .card { background-color: #1f2937; border: 1px solid #374151; border-radius: 0.5rem; padding: 1.5rem; margin-bottom: 1.5rem; }
+        .table-header { background-color: #374151; }
+        .table-row-light { background-color: #2b3544; }
+        .config-input { background-color: #374151; border: 1px solid #4b5563; }
+        .config-input:read-only { background-color: #1f2937; border-color: #1f2937; cursor: not-allowed; }
+        .info-row { display: flex; align-items: center; padding: 0.5rem 0; }
+        .info-label { font-weight: bold; color: #9ca3af; margin-right: 1rem; flex-shrink: 0; min-width: 150px; }
+        .info-value { color: #ffffff; flex-grow: 1; }
+        .highlight-row { background-color: #4b5563; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300 p-4 sm:p-8">
+    <div class="max-w-7xl mx-auto" id="report-container">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-bold text-white">Ranked War Report</h1>
+            <h2 class="text-2xl text-cyan-400">{{ our_faction_name }} vs {{ opponent_faction_name }} (War ID: {{ war_id }})</h2>
+        </header>
+
+        <div class="card">
+            <div class="mb-4">
+                <div class="info-row">
+                    <span class="info-label">Start Date:</span>
+                    <span class="info-value">{{ start_str }}</span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">End Date:</span>
+                    <span class="info-value">{{ end_str }}</span>
+                </div>
+                <div class="info-row">
+                    <label for="prizeTotal" class="info-label">Prize Total:</label>
+                    <input type="text" id="prizeTotal" class="config-input w-2/3 rounded-md p-1 text-white" value="{{ prize_total }}">
+                </div>
+                <div class="info-row">
+                    <label for="factionShare" class="info-label">Faction Share:</label>
+                    <div class="flex items-center">
+                        <input type="number" id="factionShare" class="config-input w-20 rounded-md p-1 text-white" value="{{ faction_share }}">
+                        <span class="ml-1">%</span>
+                    </div>
+                </div>
+                <div class="info-row">
+                    <label for="guaranteedShare" class="info-label">Guaranteed Share:</label>
+                    <div class="flex items-center">
+                        <input type="number" id="guaranteedShare" class="config-input w-20 rounded-md p-1 text-white" value="{{ guaranteed_share }}">
+                        <span class="ml-1">%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3 class="text-xl font-semibold text-white mb-4">Member Contributions & Payouts</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <thead class="table-header">
+                        <tr>
+                            <th class="p-3">Status</th>
+                            <th class="p-3">Member</th>
+                            <th class="p-3 text-right">Respect Gained</th>
+                            <th class="p-3 text-right">Respect Share</th>
+                            <th class="p-3 text-right">Guaranteed Share</th>
+                            <th class="p-3 text-right">Participation Share</th>
+                            <th class="p-3 text-right">Total Prize</th>
+                        </tr>
+                    </thead>
+                    <tbody id="member-table-body">
+                        {% for member_id, stats in member_stats %}
+                        <tr class="table-row-light" data-respect="{{ '%.2f'|format(stats.respect_gained) }}" data-enabled="true" data-member-id="{{ member_id }}" data-member-name="{{ stats.name }}">
+                            <td class="p-3">
+                                <button class="status-toggle p-1 rounded-full bg-green-500 hover:bg-green-600">
+                                    <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+                                </button>
+                            </td>
+                            <td class="p-3 cursor-pointer" onclick="copyMemberInfo(this, '{{ stats.name }}', '{{ member_id }}')">
+                                <a href="https://www.torn.com/profiles.php?XID={{ member_id }}" target="_blank" class="text-cyan-400 hover:underline">{{ stats.name }} [{{ member_id }}]</a>
+                            </td>
+                            <td class="p-3 text-right">{{ '%.2f'|format(stats.respect_gained) }}</td>
+                            <td class="p-3 text-right">
+                                {% if total_respect_gained > 0 %}
+                                    {{ '%.2f'|format((stats.respect_gained / total_respect_gained) * 100) }}%
+                                {% else %}
+                                    0.00%
+                                {% endif %}
+                            </td>
+                            <td class="p-3 text-right text-yellow-400 font-semibold guaranteed-share">$0</td>
+                            <td class="p-3 text-right text-green-400 font-semibold participation-share">$0</td>
+                            <td class="p-3 text-right text-white font-bold total-prize">
+                                <a href="#" class="text-white hover:underline" onclick="event.preventDefault(); window.open('https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user&addMoneyTo={{ member_id }}&money=' + Math.round(parseFloat(this.closest('tr').dataset.totalPrize)), '_blank'); highlightRow(this.closest('tr'));">
+                                    $0
+                                </a>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr class="table-header font-bold">
+                            <td class="p-3" colspan="2">Total</td>
+                            <td class="p-3 text-right">{{ '%.2f'|format(total_respect_gained) }}</td>
+                            <td class="p-3 text-right">100.00%</td>
+                            <td id="total-guaranteed" class="p-3 text-right">$0</td>
+                            <td id="total-participation" class="p-3 text-right">$0</td>
+                            <td id="total-payout" class="p-3 text-right">$0</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+
+        <div class="mt-8 flex justify-center space-x-4">
+             <button id="screenshotButton" class="p-4 rounded-md bg-blue-600 hover:bg-blue-700" title="Download Screenshot">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd" />
+                </svg>
+            </button>
+            <button id="lockButton" class="p-4 rounded-md bg-cyan-600 hover:bg-cyan-700" title="Lock/Unlock Inputs">
+                <svg id="lockIcon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" /></svg>
+                <svg id="unlockIcon" xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white hidden" viewBox="0 0 20 20" fill="currentColor"><path d="M10 2a5 5 0 00-5 5v2a2 2 0 00-2 2v5a2 2 0 002 2h10a2 2 0 002-2v-5a2 2 0 00-2-2V7a5 5 0 00-5-5zm0 2a3 3 0 00-3 3v2h6V7a3 3 0 00-3-3z" /></svg>
+            </button>
+        </div>
+    </div>
+    <script>
+        const warId = '{{ war_id }}';
+        const storagePrefix = `warReport_${warId}_`;
+
+        const prizeTotalInput = document.getElementById('prizeTotal');
+        const factionShareInput = document.getElementById('factionShare');
+        const guaranteedShareInput = document.getElementById('guaranteedShare');
+        const memberRows = document.querySelectorAll('#member-table-body tr[data-respect]');
+        const lockButton = document.getElementById('lockButton');
+        const screenshotButton = document.getElementById('screenshotButton');
+        const lockIcon = document.getElementById('lockIcon');
+        const unlockIcon = document.getElementById('unlockIcon');
+        const inputs = [prizeTotalInput, factionShareInput, guaranteedShareInput];
+
+        function formatNumber(n) { return n.toString().replace(/\D/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+        
+        function calculatePayouts() {
+            let totalRespect = 0, participantCount = 0;
+            memberRows.forEach(row => {
+                if (row.dataset.enabled === 'true') {
+                    totalRespect += parseFloat(row.dataset.respect) || 0;
+                    participantCount++;
+                }
+            });
+            
+            const prizeTotal = parseFloat(prizeTotalInput.value.replace(/,/g, '')) || 0;
+            const factionSharePercent = parseFloat(factionShareInput.value) || 0;
+            const guaranteedSharePercent = parseFloat(guaranteedShareInput.value) || 0;
+            
+            const factionTake = prizeTotal * (factionSharePercent / 100);
+            const memberPool = prizeTotal - factionTake;
+            const guaranteedPool = memberPool * (guaranteedSharePercent / 100);
+            const participationPool = memberPool - guaranteedPool;
+            
+            let totalGuaranteedPaid = 0, totalParticipationPaid = 0;
+            
+            memberRows.forEach(row => {
+                if (row.dataset.enabled === 'true') {
+                    const respect = parseFloat(row.dataset.respect);
+                    const respectShare = totalRespect > 0 ? (respect / totalRespect) : 0;
+                    const guaranteedPayout = participantCount > 0 ? (guaranteedPool / participantCount) : 0;
+                    const participationPayout = participationPool * respectShare;
+                    const totalMemberPrize = guaranteedPayout + participationPayout;
+                    
+                    row.querySelector('.guaranteed-share').textContent = `$` + Math.round(guaranteedPayout).toLocaleString();
+                    row.querySelector('.participation-share').textContent = `$` + Math.round(participationPayout).toLocaleString();
+                    row.dataset.totalPrize = Math.round(totalMemberPrize);
+                    
+                    const prizeLink = row.querySelector('.total-prize a');
+                    prizeLink.textContent = `$` + Math.round(totalMemberPrize).toLocaleString();
+                    prizeLink.href = `https://www.torn.com/factions.php?step=your#/tab=controls&option=give-to-user&addMoneyTo=${row.dataset.memberId}&money=${Math.round(totalMemberPrize)}`;
+                    
+                    totalGuaranteedPaid += Math.round(guaranteedPayout);
+                    totalParticipationPaid += Math.round(participationPayout);
+                } else {
+                    row.querySelector('.guaranteed-share').textContent = '$0';
+                    row.querySelector('.participation-share').textContent = '$0';
+                    const prizeLink = row.querySelector('.total-prize a');
+                    prizeLink.textContent = '$0';
+                    prizeLink.href = '#';
+                    row.dataset.totalPrize = '0';
+                }
+            });
+            
+            document.getElementById('total-guaranteed').textContent = `$` + totalGuaranteedPaid.toLocaleString();
+            document.getElementById('total-participation').textContent = `$` + totalParticipationPaid.toLocaleString();
+            document.getElementById('total-payout').textContent = `$` + (totalGuaranteedPaid + totalParticipationPaid).toLocaleString();
+        }
+        
+        function togglePlayerStatus(button) {
+            const row = button.closest('tr');
+            const isEnabled = row.dataset.enabled === 'true';
+            if (isEnabled) {
+                row.dataset.enabled = 'false';
+                button.classList.remove('bg-green-500', 'hover:bg-green-600');
+                button.classList.add('bg-red-500', 'hover:bg-red-600');
+                button.innerHTML = `<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>`;
+            } else {
+                row.dataset.enabled = 'true';
+                button.classList.remove('bg-red-500', 'hover:bg-red-600');
+                button.classList.add('bg-green-500', 'hover:bg-green-600');
+                button.innerHTML = `<svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>`;
+            }
+            calculatePayouts();
+        }
+
+        let lastHighlightedRow = null;
+        function highlightRow(row) {
+            if (lastHighlightedRow) { lastHighlightedRow.classList.remove('highlight-row'); }
+            row.classList.add('highlight-row');
+            lastHighlightedRow = row;
+        }
+
+        function copyMemberInfo(element, memberName, memberId) {
+            highlightRow(element.closest('tr'));
+            navigator.clipboard.writeText(`${memberName} [${memberId}]`);
+        }
+        
+        function takeScreenshot() {
+            const reportContainer = document.getElementById('report-container');
+            const buttonsParent = document.querySelector('.mt-8.flex');
+            buttonsParent.style.display = 'none';
+            html2canvas(reportContainer, { backgroundColor: '#111827', windowWidth: reportContainer.scrollWidth, windowHeight: reportContainer.scrollHeight })
+                .then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = `war_report_${warId}.png`;
+                    link.href = canvas.toDataURL('image/png');
+                    link.click();
+                    buttonsParent.style.display = 'flex';
+                });
+        }
+        
+        function toggleLock(isLocked) {
+            inputs.forEach(input => input.readOnly = isLocked);
+            lockIcon.classList.toggle('hidden', isLocked);
+            unlockIcon.classList.toggle('hidden', !isLocked);
+            if (isLocked) {
+                localStorage.setItem(storagePrefix + 'prizeTotal', prizeTotalInput.value);
+                localStorage.setItem(storagePrefix + 'factionShare', factionShareInput.value);
+                localStorage.setItem(storagePrefix + 'guaranteedShare', guaranteedShareInput.value);
+                localStorage.setItem(storagePrefix + 'locked', 'true');
+            } else {
+                localStorage.removeItem(storagePrefix + 'locked');
+            }
+        }
+        
+        function loadFromStorage() {
+            const isLocked = localStorage.getItem(storagePrefix + 'locked') === 'true';
+            // Only load from storage if the state was locked. Otherwise, use the values from the Python script.
+            if (isLocked) {
+                prizeTotalInput.value = formatNumber(localStorage.getItem(storagePrefix + 'prizeTotal') || prizeTotalInput.value);
+                factionShareInput.value = localStorage.getItem(storagePrefix + 'factionShare') || factionShareInput.value;
+                guaranteedShareInput.value = localStorage.getItem(storagePrefix + 'guaranteedShare') || guaranteedShareInput.value;
+            }
+            toggleLock(isLocked);
+            calculatePayouts();
+        }
+        
+        document.querySelectorAll('.status-toggle').forEach(button => { button.addEventListener('click', () => togglePlayerStatus(button)); });
+        
+        prizeTotalInput.addEventListener('input', (e) => {
+            const formatted = formatNumber(e.target.value);
+            e.target.value = formatted;
+            calculatePayouts();
+        });
+        factionShareInput.addEventListener('input', calculatePayouts);
+        guaranteedShareInput.addEventListener('input', calculatePayouts);
+        lockButton.addEventListener('click', () => toggleLock(!lockIcon.classList.contains('hidden')));
+        screenshotButton.addEventListener('click', takeScreenshot);
+        
+        // **THIS IS THE FIX**: Format the initial prize total on page load.
+        prizeTotalInput.value = formatNumber(prizeTotalInput.value);
+        
+        window.onload = loadFromStorage;
+    </script>
+</body>
+</html>

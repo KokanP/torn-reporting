@@ -20,7 +20,8 @@ def get_config():
     config = {
         'api_key': None,
         'faction_share_default': '30',
-        'guaranteed_share_default': '10'
+        'guaranteed_share_default': '10',
+        'presets': {}
     }
 
     if not os.path.exists('config.ini'):
@@ -45,6 +46,11 @@ def get_config():
     if 'Defaults' in config_parser:
         config['faction_share_default'] = config_parser['Defaults'].get('FactionShare', config['faction_share_default'])
         config['guaranteed_share_default'] = config_parser['Defaults'].get('GuaranteedShare', config['guaranteed_share_default'])
+    
+    # Read Presets
+    for section in config_parser.sections():
+        if section.startswith('Preset_'):
+            config['presets'][section] = dict(config_parser.items(section))
 
     return config
 
@@ -157,24 +163,53 @@ def process_war_data(war_report, all_attacks, our_faction_id):
     member_stats = {}
     our_members_in_war = war_data.get('members', {}).get(str(our_faction_id), {})
     for member_id, member_details in our_members_in_war.items():
-        member_stats[member_id] = {'respect_gained': 0, 'name': member_details.get('name', 'Unknown')}
+        member_stats[member_id] = {
+            'name': member_details.get('name', 'Unknown'),
+            'respect_gained': 0.0,
+            'base_respect_gained': 0.0,
+            'hits_made': 0,
+            'assists': 0,
+            'hits_taken': 0,
+            'defends': 0,
+            'stalemates': 0
+        }
 
     if all_attacks:
         for attack in all_attacks:
-            is_our_attack = (attack.get('attacker_faction') == our_faction_id and
-                             attack.get('defender_faction') == opponent_faction_id)
-            is_ranked_war_attack = attack.get('ranked_war') == 1
+            if attack.get('ranked_war') != 1:
+                continue
 
-            if is_our_attack and is_ranked_war_attack:
-                attacker_id = str(attack['attacker_id'])
-                respect_gain = attack.get('respect_gain', 0)
+            attacker_id_str = str(attack.get('attacker_id'))
+            defender_id_str = str(attack.get('defender_id'))
 
-                if attacker_id in member_stats:
-                    member_stats[attacker_id]['respect_gained'] += respect_gain
+            is_offensive = (attack.get('attacker_faction') == our_faction_id and
+                            attack.get('defender_faction') == opponent_faction_id)
+
+            if is_offensive and attacker_id_str in member_stats:
+                member_stats[attacker_id_str]['hits_made'] += 1
+                respect_gain = float(attack.get('respect_gain', 0.0))
+                member_stats[attacker_id_str]['respect_gained'] += respect_gain
+                
+                chain_bonus = float(attack.get('modifiers', {}).get('chain_bonus', 1.0) or 1.0)
+                base_respect = respect_gain / chain_bonus
+                member_stats[attacker_id_str]['base_respect_gained'] += base_respect
+
+                if attack.get('result') == 'Assist':
+                    member_stats[attacker_id_str]['assists'] += 1
+
+            is_defensive = (attack.get('defender_faction') == our_faction_id and
+                            attack.get('attacker_faction') == opponent_faction_id)
+
+            if is_defensive and defender_id_str in member_stats:
+                result = attack.get('result')
+                if result == 'Lost':
+                    member_stats[defender_id_str]['hits_taken'] += 1
+                elif result == 'Stalemate':
+                    member_stats[defender_id_str]['stalemates'] += 1
                 else:
-                    member_stats[attacker_id] = {'respect_gained': respect_gain, 'name': attack.get('attacker_name', 'Unknown (Ex-member)')}
+                    member_stats[defender_id_str]['defends'] += 1
 
-    active_members = {mid: stats for mid, stats in member_stats.items() if stats['respect_gained'] > 0}
+    active_members = member_stats
     sorted_stats = sorted(active_members.items(), key=lambda item: item[1]['respect_gained'], reverse=True)
 
     return {
@@ -184,9 +219,79 @@ def process_war_data(war_report, all_attacks, our_faction_id):
         'opponent_faction_name': factions.get(str(opponent_faction_id), {}).get('name', 'Opponent')
     }
 
+def calculate_final_payouts(settings, member_stats, prize_total_str, faction_share_str, guaranteed_share_str):
+    """Calculates final dollar amounts for each member based on selected settings."""
+    logging.info("Calculating final payouts based on settings...")
+
+    try:
+        prize_total = int(str(prize_total_str).replace(',', '').replace('$', '').strip())
+        faction_share_percent = int(faction_share_str)
+        guaranteed_share_percent = int(guaranteed_share_str)
+    except (ValueError, TypeError):
+        logging.error("Invalid numeric value provided for payout calculation.")
+        return member_stats
+
+    use_bonus_respect = settings.get('use_bonus_respect', 'true').lower() == 'true'
+    assist_payment_type = settings.get('assist_payment_type', 'none')
+    assist_payment_value = int(settings.get('assist_payment_value', '0'))
+    penalty_per_hit_taken = int(settings.get('penalty_per_hit_taken', '0'))
+
+    member_data = dict(member_stats)
+    if not member_data:
+        logging.warning("No member data to calculate payouts for.")
+        return []
+    
+    participant_count = len(member_data)
+
+    faction_take = prize_total * (faction_share_percent / 100)
+    member_pool = prize_total - faction_take
+
+    guaranteed_pool = member_pool * (guaranteed_share_percent / 100)
+    guaranteed_payout_per_member = guaranteed_pool / participant_count if participant_count > 0 else 0
+
+    adjustable_pool = member_pool - guaranteed_pool
+
+    total_assists = sum(stats['assists'] for stats in member_data.values())
+    total_hits_taken = sum(stats['hits_taken'] for stats in member_data.values())
+
+    total_assist_payout = 0
+    if assist_payment_type == 'flat':
+        total_assist_payout = total_assists * assist_payment_value
+    
+    total_penalty_deductions = total_hits_taken * penalty_per_hit_taken
+    
+    participation_pool = adjustable_pool - total_assist_payout - total_penalty_deductions
+    if participation_pool < 0:
+        logging.warning(f"Participation pool is negative (${participation_pool:,.2f}). Payouts from respect share will be zero.")
+        participation_pool = 0
+
+    respect_key = 'respect_gained' if use_bonus_respect else 'base_respect_gained'
+    total_respect_to_share = sum(stats[respect_key] for stats in member_data.values())
+    
+    for _, stats in member_data.items():
+        stats['guaranteed_payout'] = guaranteed_payout_per_member
+        stats['penalty_amount'] = stats['hits_taken'] * penalty_per_hit_taken
+        
+        stats['assist_payout'] = 0
+        if assist_payment_type == 'flat':
+            stats['assist_payout'] = stats['assists'] * assist_payment_value
+            
+        member_respect = stats[respect_key]
+        respect_share_percent = (member_respect / total_respect_to_share) if total_respect_to_share > 0 else 0
+        stats['participation_payout'] = participation_pool * respect_share_percent
+        
+        stats['adjustments'] = stats['assist_payout'] - stats['penalty_amount']
+        stats['respect_payout'] = stats['guaranteed_payout'] + stats['participation_payout']
+        stats['final_payout'] = stats['respect_payout'] + stats['adjustments']
+
+    sorted_member_data = sorted(member_data.items(), key=lambda item: item[1]['final_payout'], reverse=True)
+    
+    logging.info("Finished calculating payouts.")
+    return sorted_member_data
+
 # --- HTML Generation Functions ---
-def generate_war_report_html(processed_data, war_id, prize_total, faction_share, guaranteed_share):
-    """Generates the final HTML report file using a Jinja2 template."""
+def generate_war_report_html(processed_data, war_id):
+    """Generates the final simple HTML report file using a Jinja2 template."""
     if not processed_data or not processed_data.get('member_stats'):
         logging.warning("No participating members found with respect gained. Report generation skipped.")
         return
@@ -198,18 +303,23 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
         logging.error("report_template.html not found in the script's directory.")
         return
 
+    member_stats = processed_data['member_stats']
+    total_respect_payout = sum(stats.get('respect_payout', 0) for _, stats in member_stats)
+    total_adjustments = sum(stats.get('adjustments', 0) for _, stats in member_stats)
+    total_final_payout = sum(stats.get('final_payout', 0) for _, stats in member_stats)
+    
     war_details = processed_data['war_details']
     context = {
         'war_id': war_id,
-        'prize_total': prize_total,
-        'faction_share': faction_share,
-        'guaranteed_share': guaranteed_share,
         'our_faction_name': processed_data['our_faction_name'],
         'opponent_faction_name': processed_data['opponent_faction_name'],
         'start_str': datetime.fromtimestamp(war_details['war']['start']).strftime('%Y-%m-%d %H:%M:%S'),
         'end_str': datetime.fromtimestamp(war_details['war']['end']).strftime('%Y-%m-%d %H:%M:%S'),
-        'member_stats': processed_data['member_stats'],
-        'total_respect_gained': sum(stats['respect_gained'] for _, stats in processed_data['member_stats'])
+        'member_stats': member_stats,
+        'total_respect_gained': sum(stats['respect_gained'] for _, stats in member_stats),
+        'total_respect_payout': total_respect_payout,
+        'total_adjustments': total_adjustments,
+        'total_final_payout': total_final_payout
     }
 
     html_content = template.render(context)
@@ -221,8 +331,57 @@ def generate_war_report_html(processed_data, war_id, prize_total, faction_share,
 
     with open(unique_filename, "w", encoding="utf-8") as f:
         f.write(html_content)
-    logging.info(f"Successfully generated {unique_filename}")
+    logging.info(f"Successfully generated simple report: {unique_filename}")
 
+def generate_advanced_report_html(processed_data, war_id):
+    """Generates the final advanced HTML report file using a Jinja2 template."""
+    if not processed_data or not processed_data.get('member_stats'):
+        logging.warning("No data for advanced report. Generation skipped.")
+        return
+
+    env = Environment(loader=FileSystemLoader('.'))
+    try:
+        template = env.get_template('advanced_report_template.html')
+    except FileNotFoundError:
+        logging.error("advanced_report_template.html not found in the script's directory.")
+        return
+
+    member_stats = processed_data['member_stats']
+    
+    # Calculate totals for all columns
+    totals = {
+        key: sum(stats.get(key, 0) for _, stats in member_stats)
+        for key in ['hits_made', 'defends', 'assists', 'hits_taken', 'stalemates', 'respect_gained', 
+                    'guaranteed_payout', 'participation_payout', 'assist_payout', 'penalty_amount', 'final_payout']
+    }
+
+    # Find top performers
+    top_earner_stats = member_stats[0][1] if member_stats else {'name': 'N/A', 'final_payout': 0}
+    top_hitter = max(member_stats, key=lambda item: item[1]['hits_made']) if member_stats else ('', {'name': 'N/A', 'hits_made': 0})
+
+    war_details = processed_data['war_details']
+    context = {
+        'war_id': war_id,
+        'our_faction_name': processed_data['our_faction_name'],
+        'opponent_faction_name': processed_data['opponent_faction_name'],
+        'start_str': datetime.fromtimestamp(war_details['war']['start']).strftime('%Y-%m-%d %H:%M:%S'),
+        'end_str': datetime.fromtimestamp(war_details['war']['end']).strftime('%Y-%m-%d %H:%M:%S'),
+        'member_stats': member_stats,
+        'totals': totals,
+        'top_earner': {'name': top_earner_stats['name'], 'payout': top_earner_stats['final_payout']},
+        'top_hitter': {'name': top_hitter[1]['name'], 'hits': top_hitter[1]['hits_made']}
+    }
+
+    html_content = template.render(context)
+    
+    opponent_name_safe = processed_data['opponent_faction_name'].replace(' ', '_').replace('[', '').replace(']', '')
+    base_filename = f"advanced_report_{war_id}_{opponent_name_safe}.html"
+    report_path = os.path.join(REPORTS_DIR, base_filename)
+    unique_filename = get_unique_filename(report_path)
+
+    with open(unique_filename, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    logging.info(f"Successfully generated advanced report: {unique_filename}")
 
 # --- Main Execution ---
 def main():
@@ -256,12 +415,16 @@ Usage Examples:
 
 4. Force Refresh (ignore and overwrite cache):
    python war_report.py 28997 --no-cache
+
+5. Using a Payout Preset from config.ini:
+   python war_report.py 28997 --prize-total 1b --preset Preset_NoBonus_AssistsFlat
 """
     )
     parser.add_argument('war_id', nargs='?', default=None, help='The ranked war ID. Required for non-interactive mode.')
     parser.add_argument('-p', '--prize-total', type=str, help='The total prize money for the war (e.g., 1000000000).')
     parser.add_argument('-f', '--faction-share', type=str, help=f"The percentage of the prize the faction keeps. Default: {config['faction_share_default']}%%")
     parser.add_argument('-g', '--guaranteed-share', type=str, help=f"The percentage of the member pool for guaranteed payouts. Default: {config['guaranteed_share_default']}%%")
+    parser.add_argument('--preset', type=str, help='The name of the payout preset to use from config.ini (e.g., Preset_Standard).')
     parser.add_argument('--no-cache', action='store_true', help='Ignore existing cache and fetch fresh attack data from the API.')
     
     args = parser.parse_args()
@@ -325,7 +488,28 @@ Usage Examples:
     processed_data = process_war_data(war_report, all_attacks, our_faction_id)
 
     if processed_data:
-        generate_war_report_html(processed_data, war_id, prize_total, faction_share, guaranteed_share)
+        # --- Payout Calculation ---
+        if processed_data.get('member_stats'):
+            active_preset = {}
+            if args.preset:
+                if args.preset in config['presets']:
+                    active_preset = config['presets'][args.preset]
+                    logging.info(f"Using '{args.preset}' preset for payout calculations.")
+                else:
+                    logging.warning(f"Preset '{args.preset}' not found in config.ini. Using default calculation logic.")
+            
+            calculated_stats = calculate_final_payouts(
+                settings=active_preset,
+                member_stats=processed_data['member_stats'],
+                prize_total_str=prize_total,
+                faction_share_str=faction_share,
+                guaranteed_share_str=guaranteed_share
+            )
+            processed_data['member_stats'] = calculated_stats
+
+        # --- Report Generation ---
+        generate_war_report_html(processed_data, war_id)
+        generate_advanced_report_html(processed_data, war_id)
 
 if __name__ == '__main__':
     main()

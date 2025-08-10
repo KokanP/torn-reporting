@@ -1,0 +1,64 @@
+LLM Code Modification Instructions
+Objective:
+You are an expert Python developer. Your task is to modify the provided code based on the requirements below.
+
+Guiding Principles
+Preservation of Functionality: Your highest priority is to ensure that all existing functionalities of the code remain intact and behave exactly as they did before your changes. Do not add, remove, or alter any features unless explicitly instructed to do so.
+
+Surgical Precision: Make the minimum necessary changes to achieve the requested task. Avoid broad refactoring, stylistic changes, or "code cleanup" on parts of the code that are not directly related to the request.
+
+Adherence to Style: Maintain the existing coding style, variable naming conventions, and commenting patterns found in the original code.
+
+Task: [Clearly and concisely state the overall goal. For example, "Add error handling and logging to the database connection function."]
+Code to Modify:
+
+[Paste the specific Python code snippet, function, or class you want the LLM to modify here.]
+
+Specific Requirements:
+
+[Use a bulleted list to detail the exact changes. Be explicit.]
+
+Example 1: In the connect_to_db() function, add a try...except block to catch psycopg2.OperationalError.
+
+Example 2: If the error is caught, the function should log the error message using the logging module and return None instead of raising the exception.
+
+Example 3: Add a new function called log_info(message) that logs messages with the INFO level.
+
+Reporting Mandate
+After providing the complete, modified code block, you must provide a separate "Change Report" in Markdown. This report is mandatory and must include the following sections:
+
+1. Summary of Changes:
+
+A brief, high-level overview of what was accomplished.
+
+2. Detailed Change Log:
+
+Provide a line-by-line or block-by-block breakdown of all modifications.
+
+Use a "Before" and "After" format for clarity.
+
+Example:
+
+Function: connect_to_db()
+
+Change: Added exception handling.
+
+Reason: To prevent the application from crashing on database connection failure, as requested.
+
+Before:
+
+# (code before changes)
+
+After:
+
+# (code after changes)
+
+3. Out-of-Scope Modifications:
+
+List any changes that were necessary but fell slightly outside the explicit instructions.
+
+Example: "I had to add import logging at the top of the file to fulfill the requirement of logging errors. This was not explicitly asked for but is a necessary dependency for the task."
+
+4. New Dependencies:
+
+List any new libraries or modules that the user must install for the new code to function correctly (e.g., pip install new-library).
