@@ -43,7 +43,8 @@ Download the project files to your computer by clicking the "Code" button and th
 If you prefer to only get the necessary files, download the two files below. **Right-click** on each link and choose **"Save Link As..."**. Make sure you save them both into the **same folder**.
 
 * **Download war\_report.py**  
-* [**Download report\_template.html**](https://www.google.com/search?q=https://raw.githubusercontent.com/KokanP/torn-reporting/main/report_template.html)
+* [**Download report\_template.html**](https://raw.githubusercontent.com/KokanP/torn-reporting/main/report_template.html)
+* [**Download war\_report.py**](https://raw.githubusercontent.com/KokanP/torn-reporting/main/war_report.py)
 
 ### **3\. Install Required Libraries**
 
