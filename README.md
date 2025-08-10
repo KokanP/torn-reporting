@@ -1,5 +1,3 @@
-# torn reporting
-
 # **Torn War Reporting**
 
 A Python script to generate detailed, interactive HTML reports for ranked wars in the online game Torn.com. It automatically fetches war data from the Torn API, calculates member participation based on respect earned, and determines prize money distribution.
@@ -34,7 +32,18 @@ If you don't have Python installed, you'll need to download it first.
 
 ### **2\. Get the Project Files**
 
-Download the project files to your computer. You can do this by clicking the "Code" button and then "Download ZIP" on the project page, or by using Git if you have it installed.
+You can either download the entire project or just the essential files.
+
+#### **Option A: Download Everything (Recommended)**
+
+Download the project files to your computer by clicking the "Code" button and then "Download ZIP" on the [project's GitHub page](https://github.com/KokanP/torn-reporting), or by using Git if you have it installed.
+
+#### **Option B: Download Individual Files**
+
+If you prefer to only get the necessary files, download the two files below. **Right-click** on each link and choose **"Save Link As..."**. Make sure you save them both into the **same folder**.
+
+* **Download war\_report.py**  
+* [**Download report\_template.html**](https://www.google.com/search?q=https://raw.githubusercontent.com/KokanP/torn-reporting/main/report_template.html)
 
 ### **3\. Install Required Libraries**
 
@@ -43,12 +52,12 @@ The script depends on a couple of Python libraries. You can install them easily 
 * Open a terminal or command prompt.  
   * **On Windows**, you can type cmd in your Start Menu.  
   * **On macOS**, you can open the "Terminal" app.  
-* Navigate to the folder where you saved the project files. You can use the cd command (e.g., cd Downloads/torn-reporting-main).  
+* Navigate to the folder where you saved the project files. You can use the cd command (e.g., cd C:\\Users\\YourUser\\Downloads\\torn-reporting).  
 * Once you are in the correct folder, run the following command:
 
-pip install \-r requirements.txt
+pip install requests jinja2
 
-This will automatically download and install the requests and jinja2 libraries.
+This will automatically download and install the required libraries.
 
 ## **How to Use**
 
@@ -56,8 +65,8 @@ This will automatically download and install the requests and jinja2 libraries.
 
 Before you can run the script, you must set up your configuration file.
 
-1. In the project folder, you will find a file named config.ini. Open this file with a text editor (like Notepad or VS Code).  
-2. You need to add your Torn API key. Replace YourActualApiKeyHere with your own key.  
+1. In the folder where you saved the script, create a new file named config.ini.  
+2. Open this file with a text editor (like Notepad or VS Code) and add your Torn API key.  
 3. Optionally, you can also set the default percentages for the FactionShare and GuaranteedShare.
 
 Your config.ini should look like this:
@@ -99,7 +108,7 @@ If you already know the war details, you can provide them as arguments to run th
 
 ### **3\. Viewing the Report**
 
-After the script finishes, it will create an HTML file in the **reports** directory. Just open this file in any web browser to view your interactive war report.
+After the script finishes, it will create an HTML file in a new **reports** directory. Just open this file in any web browser to view your interactive war report.
 
 ## **License**
 
