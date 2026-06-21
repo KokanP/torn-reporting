@@ -2,113 +2,83 @@
 
 A Python script to generate detailed, interactive HTML reports for ranked wars in the online game Torn.com. It automatically fetches war data from the Torn API, calculates member participation based on respect earned, and determines prize money distribution.
 
-The final output is a single, self-contained HTML file that can be shared and used to manage payouts easily.
+The project has evolved through several iterations. The latest and recommended version is **`v4`**, which features highly strict data filtering, advanced metrics like "Fair Respect" and "True Base", and a powerful, interactive dashboard.
 
-## **Features**
+## **Features (v4)**
 
-* **Direct API Integration**: Fetches war details and attack logs directly from the Torn API.  
-* **Automated Calculations**: Calculates each member's respect contribution during the war.  
-* **Interactive HTML Reports**: Generates a sophisticated, single-file HTML report.  
-  * Dynamically adjust the total prize money, the faction's cut, and the guaranteed share for participants.  
-  * Toggle members on or off to instantly recalculate payouts for the remaining participants.  
-  * Includes direct links that pre-fill the "give money" page in Torn for each member.  
-  * Easily copy a member's name and ID to your clipboard.  
-  * Take a screenshot of the report for easy sharing.  
-  * Lock the configuration to prevent accidental changes.  
-* **Caching**: Caches API results to speed up subsequent runs and reduce API calls.  
-* **Flexible Execution**: Can be run in an interactive mode that prompts for inputs or directly with command-line arguments.
+* **Strict Attack Filtering**: Guaranteed 100% accuracy. The script strictly checks timestamps and specific `ranked_war` modifiers directly from the Torn API. If an attack is not part of the official Ranked War score, it is not counted.
+* **Advanced Respect Metrics**:
+  * **Full Respect**: Total respect gained, including all chain modifiers and bonus hits.
+  * **Fair Respect**: Respect gained keeping normal chain progression but flattening massive bonus multipliers (e.g. 10x, 25x bonuses).
+  * **True Base (Fairness)**: Pure base respect without any multipliers. The most "communist" approach.
+  * **Hits**: Distribution based purely on the number of attacks.
+* **Interactive Dashboard**:
+  * Dynamically adjust the total prize money, the faction's cut, and the guaranteed share.
+  * Live-toggle between metrics (Full, Fair, Base, Hits) and watch the final payouts recalculate instantly in your browser.
+  * Inactive members (0 hits and 0 assists) are automatically excluded from the guaranteed pool to prevent dilution.
+  * Toggle specific members on or off to adjust payouts.
+  * One-click "Export Image" (screenshot) button that automatically hides inactive participants for a clean, shareable image.
+  * Detailed attack type breakdown (Hospitalizations, Mugs, Leaves, Assists).
+* **Caching**: Caches API results to speed up subsequent runs and reduce API calls.
 
 ## **Installation**
 
-To get the script up and running, follow these steps.
+### **1. Install Python**
+Download and install Python from the [official website](https://www.python.org/downloads/). Ensure you check "Add Python to PATH" during installation.
 
-### **1\. Install Python**
+### **2. Get the Project**
+Download the project files from the [GitHub page](https://github.com/KokanP/torn-reporting) or clone the repository via Git.
 
-If you don't have Python installed, you'll need to download it first.
+### **3. Install Required Libraries**
+Open a terminal in the `v4` directory and run:
+```bash
+pip install -r requirements.txt
+```
+*(Dependencies: `requests`, `jinja2`)*
 
-* Go to the [official Python website](https://www.python.org/downloads/).  
-* Download the latest version for your operating system (Windows, macOS, etc.).  
-* Run the installer. **Important**: On the first screen of the installer, make sure to check the box that says **"Add Python to PATH"** or "Add python.exe to PATH".
+## **Configuration**
 
-### **2\. Get the Project Files**
+Navigate to the `v4` folder and edit (or create) a file named `config.ini` with your Torn API key and payout presets.
 
-You can either download the entire project or just the essential files.
+```ini
+[TornAPI]
+ApiKey = YourActualApiKeyHere
 
-#### **Option A: Download Everything (Recommended)**
+[Defaults]
+FactionShare = 30
+GuaranteedShare = 10
 
-Download the project files to your computer by clicking the "Code" button and then "Download ZIP" on the [project's GitHub page](https://github.com/KokanP/torn-reporting), or by using Git if you have it installed.
+# Example Payout Preset
+[Preset_NoBonus_Respect_Only]
+use_bonus_respect = false
+use_fair_respect = true
+assist_payment_type = none
+```
 
-#### **Option B: Download Individual Files**
+## **Running the Script**
 
-If you prefer to only get the necessary files, download the two files below. **Right-click** on each link and choose **"Save Link As..."**. Make sure you save them both into the **same folder**.
+Navigate to the `v4` folder in your terminal and run the script:
 
-* [**Download report\_template.html**](https://raw.githubusercontent.com/KokanP/torn-reporting/main/report_template.html)
-* [**Download war\_report.py**](https://raw.githubusercontent.com/KokanP/torn-reporting/main/war_report.py)
+### **Interactive Mode**
+```bash
+cd v4
+python war_report.py
+```
+The script will prompt you for the War ID, Total Prize Pool, Faction Share, Guaranteed Share, and your chosen preset.
 
-### **3\. Install Required Libraries**
+### **Command-Line Mode**
+Provide the War ID as an argument:
+```bash
+python war_report.py <WAR_ID>
+```
+You can also supply optional arguments to skip prompts:
+```bash
+python war_report.py 38640 --prize-total 1.2b --preset Preset_NoBonus_Respect_Only
+```
 
-The script depends on a couple of Python libraries. You can install them easily using the requirements.txt file included in the project.
+## **Viewing the Report**
 
-* Open a terminal or command prompt.  
-  * **On Windows**, you can type cmd in your Start Menu.  
-  * **On macOS**, you can open the "Terminal" app.  
-* Navigate to the folder where you saved the project files. You can use the cd command (e.g., cd C:\\Users\\YourUser\\Downloads\\torn-reporting).  
-* Once you are in the correct folder, run the following command:
-
-pip install requests jinja2
-
-This will automatically download and install the required libraries.
-
-## **How to Use**
-
-### **1\. Configuration**
-
-Before you can run the script, you must set up your configuration file.
-
-1. In the folder where you saved the script, create a new file named config.ini.  
-2. Open this file with a text editor (like Notepad or VS Code) and add your Torn API key.  
-3. Optionally, you can also set the default percentages for the FactionShare and GuaranteedShare.
-
-Your config.ini should look like this:
-
-\[TornAPI\]  
-ApiKey \= YourActualApiKeyHere
-
-\[Defaults\]  
-FactionShare \= 30  
-GuaranteedShare \= 10
-
-### **2\. Running the Script**
-
-You can run the script in two ways from your terminal or command prompt.
-
-#### **Interactive Mode**
-
-This is the easiest way to start. It will ask you for all the necessary information.
-
-1. Make sure you are in the project directory in your terminal.  
-2. Run the following command:  
-   python war\_report.py
-
-3. The script will then prompt you to enter the War ID, the total prize money, and the payout shares.
-
-#### **Command-Line Mode**
-
-If you already know the war details, you can provide them as arguments to run the script faster.
-
-* To generate a basic report:  
-  (This will use the default share percentages from your config.ini file.)  
-  python war\_report.py 28997
-
-* **To specify all payout details:**  
-  python war\_report.py 28997 \--prize-total 1000000000 \--faction-share 25 \--guaranteed-share 5
-
-* **To force the script to re-download attack data (ignoring the cache):**  
-  python war\_report.py 28997 \--no-cache
-
-### **3\. Viewing the Report**
-
-After the script finishes, it will create an HTML file in a new **reports** directory. Just open this file in any web browser to view your interactive war report.
+Once execution is complete, a new HTML file will be generated in the `v4/reports/` folder. Open this file in your browser to view the interactive dashboard.
 
 ## **License**
 
