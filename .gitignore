@@ -3,8 +3,3 @@ deprecated/
 reports/
 cache/
 v3_config.ini
-node_modules/
-test-results/
-playwright-report/
-*.sqlite
-__pycache__/
